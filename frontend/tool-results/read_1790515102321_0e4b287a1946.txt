@@ -1,0 +1,702 @@
+    59→    59→import { Switch } from "@/components/ui/switch";
+    60→    60→import { cn } from "@/lib/utils";
+    61→    61→import { PageHeader } from "@/components/account/page-header";
+    62→    62→import { fadeUp, fadeIn, staggerContainer } from "@/components/account/motion-presets";
+    63→    63→import { downloadBlob } from "@/components/account/download";
+    64→    64→
+    65→    65→/* ------------------------------ Local storage ----------------------------- */
+    66→    66→
+    67→    67→const NOTIFICATION_KEY = "resumeforge-notifications";
+    68→    68→const STORE_KEY = "resumeforge-store";
+    69→    69→const MATCH_HISTORY_KEY = "resumeforge-match-history";
+    70→    70→const NOTIFS_READ_KEY = "resumeforge-notifs-read-v2";
+    71→    71→const STORAGE_QUOTA_KB = 5120; // ~5 MB localStorage budget used for the usage meter
+    72→    72→const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
+    73→    73→
+    74→    74→const DEFAULT_PREFS = { digest: true, ats: true, templates: false, product: false };
+    75→    75→type Prefs = typeof DEFAULT_PREFS;
+    76→    76→
+    77→    77→const NOTIFICATION_ROWS: Array<{ key: keyof Prefs; title: string; description: string }> = [
+    78→    78→  { key: "digest", title: "Weekly job-match digest", description: "A Monday email with roles matched to your resumes." },
+    79→    79→  { key: "ats", title: "ATS score reminders", description: "Nudge me when a resume hasn't been scanned in 7 days." },
+    80→    80→  { key: "templates", title: "New template alerts", description: "Know the moment a fresh template lands in the gallery." },
+    81→    81→  { key: "product", title: "Product updates", description: "Occasional notes about new features and improvements." },
+    82→    82→];
+    83→    83→
+    84→    84→const THEME_OPTIONS = [
+    85→    85→  { value: "light", label: "Light", icon: Sun, hint: "Bright & crisp" },
+    86→    86→  { value: "dark", label: "Dark", icon: Moon, hint: "Easy on the eyes" },
+    87→    87→  { value: "system", label: "System", icon: Monitor, hint: "Match your OS" },
+    88→    88→] as const;
+    89→    89→
+    90→    90→const NAV_SECTIONS = [
+    91→    91→  { id: "profile", label: "Profile", icon: UserRound },
+    92→    92→  { id: "appearance", label: "Appearance", icon: Palette },
+    93→    93→  { id: "notifications", label: "Notifications", icon: Bell },
+    94→    94→  { id: "data", label: "Data & privacy", icon: Database },
+    95→    95→  { id: "danger", label: "Danger zone", icon: ShieldAlert },
+    96→    96→  { id: "about", label: "About", icon: Info },
+    97→    97→] as const;
+    98→    98→
+    99→    99→function initialsOf(name: string): string {
+   100→   100→  const parts = name.trim().split(/\s+/).filter(Boolean);
+   101→   101→  if (parts.length === 0) return "?";
+   102→   102→  return parts
+   103→   103→    .slice(0, 2)
+   104→   104→    .map((p) => p[0]!.toUpperCase())
+   105→   105→    .join("");
+   106→   106→}
+   107→   107→
+   108→   108→/* ------------------------------ Backup import ----------------------------- */
+   109→   109→
+   110→   110→interface ParsedBackup {
+   111→   111→  payload: Record<string, unknown>;
+   112→   112→  resumeCount: number;
+   113→   113→  applicationCount: number | null; // null = absent, store will fall back to seed applications
+   114→   114→  scoreHistoryCount: number | null; // null = absent, store will fall back to seed score history
+   115→   115→  exportedAt: string | null;
+   116→   116→  /** "v2" when the backup carries a 2.x version string or a meta object, "v1" otherwise. */
+   117→   117→  formatVersion: "v1" | "v2";
+   118→   118→  /** Interview favorites from meta.favorites.interview — null when absent or malformed (v1 backups, bare v2). */
+   119→   119→  interviewFavorites: string[] | null;
+   120→   120→}
+   121→   121→
+   122→   122→function parseBackupText(text: string): { ok: true; data: ParsedBackup } | { ok: false; reason: string } {
+   123→   123→  let parsed: unknown;
+   124→   124→  try {
+   125→   125→    parsed = JSON.parse(text);
+   126→   126→  } catch {
+   127→   127→    return { ok: false, reason: "That file isn't valid JSON. Export a fresh backup from Settings and try again." };
+   128→   128→  }
+   129→   129→  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+   130→   130→    return { ok: false, reason: "This doesn't look like a ResumeForge backup — expected a JSON object." };
+   131→   131→  }
+   132→   132→  const obj = parsed as Record<string, unknown>;
+   133→   133→  const rawResumes = Array.isArray(obj.resumes) ? obj.resumes : null;
+   134→   134→  if (obj.app !== "ResumeForge AI" && !rawResumes) {
+   135→   135→    return { ok: false, reason: "This doesn't look like a ResumeForge backup — the \"app\" marker and resumes array are missing." };
+   136→   136→  }
+   137→   137→  if (!rawResumes || rawResumes.length === 0) {
+   138→   138→    return { ok: false, reason: "The backup contains no resumes, so there is nothing to restore." };
+   139→   139→  }
+   140→   140→  for (let i = 0; i < rawResumes.length; i++) {
+   141→   141→    const entry: unknown = rawResumes[i];
+   142→   142→    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+   143→   143→      return { ok: false, reason: `Resume #${i + 1} in the backup is malformed (expected an object).` };
+   144→   144→    }
+   145→   145→    const rec = entry as Record<string, unknown>;
+   146→   146→    const titleOk = typeof rec.title === "string";
+   147→   147→    if (
+   148→   148→      typeof rec.id !== "string" ||
+   149→   149→      rec.id.trim() === "" ||
+   150→   150→      !titleOk ||
+   151→   151→      !rec.personal ||
+   152→   152→      typeof rec.personal !== "object" ||
+   153→   153→      Array.isArray(rec.personal)
+   154→   154→    ) {
+   155→   155→      const label = titleOk ? `"${rec.title}"` : `#${i + 1}`;
+   156→   156→      return {
+   157→   157→        ok: false,
+   158→   158→        reason: `Resume ${label} is missing an id, a title or personal details — the backup looks corrupted.`,
+   159→   159→      };
+   160→   160→    }
+   161→   161→  }
+   162→   162→  /* Format detection (v1 vs v2): a 2.x version string or a meta object marks a v2 backup.
+   163→   163→     Everything else — including versionless legacy exports — is treated as v1. */
+   164→   164→  const rawMeta: unknown = obj.meta;
+   165→   165→  const hasMeta = !!rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta);
+   166→   166→  const versionIs2 = typeof obj.version === "string" && obj.version.trim().startsWith("2");
+   167→   167→  const formatVersion: "v1" | "v2" = versionIs2 || hasMeta ? "v2" : "v1";
+   168→   168→
+   169→   169→  /* v2 extras: meta.favorites.interview is an optional array of company keys.
+   170→   170→     Normalized the same way readFavorites() stores them (trim/lowercase/dedupe). */
+   171→   171→  let interviewFavorites: string[] | null = null;
+   172→   172→  if (formatVersion === "v2" && hasMeta) {
+   173→   173→    const favorites: unknown = (rawMeta as Record<string, unknown>).favorites;
+   174→   174→    if (favorites && typeof favorites === "object" && !Array.isArray(favorites)) {
+   175→   175→      const interview: unknown = (favorites as Record<string, unknown>).interview;
+   176→   176→      if (Array.isArray(interview)) {
+   177→   177→        interviewFavorites = interview
+   178→   178→          .filter((v): v is string => typeof v === "string")
+   179→   179→          .map((v) => v.trim().toLowerCase())
+   180→   180→          .filter((v) => v.length > 0)
+   181→   181→          .filter((v, i, arr) => arr.indexOf(v) === i); // dedupe, keep first
+   182→   182→      }
+   183→   183→    }
+   184→   184→  }
+   185→   185→
+   186→   186→  return {
+   187→   187→    ok: true,
+   188→   188→    data: {
+   189→   189→      payload: obj,
+   190→   190→      resumeCount: rawResumes.length,
+   191→   191→      applicationCount: Array.isArray(obj.applications) ? obj.applications.length : null,
+   192→   192→      scoreHistoryCount: Array.isArray(obj.scoreHistory) ? obj.scoreHistory.length : null,
+   193→   193→      exportedAt: typeof obj.exportedAt === "string" ? obj.exportedAt : null,
+   194→   194→      formatVersion,
+   195→   195→      interviewFavorites,
+   196→   196→    },
+   197→   197→  };
+   198→   198→}
+   199→   199→
+   200→   200→function formatBackupDate(iso: string | null): string {
+   201→   201→  if (!iso) return "Not recorded";
+   202→   202→  const date = new Date(iso);
+   203→   203→  if (!isValidDate(date)) return "Not recorded";
+   204→   204→  return format(date, "MMM d, yyyy 'at' h:mm a");
+   205→   205→}
+   206→   206→
+   207→   207→function SummaryRow({ label, value }: { label: string; value: string }) {
+   208→   208→  return (
+   209→   209→    <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2">
+   210→   210→      <span className="text-muted-foreground">{label}</span>
+   211→   211→      <span className="text-right font-medium tabular-nums">{value}</span>
+   212→   212→    </div>
+   213→   213→  );
+   214→   214→}
+   215→   215→
+   216→   216→/* --------------------------- Stored tool data ----------------------------- */
+   217→   217→
+   218→   218→/** Number of saved match analyses (reader lives in components/match/history.ts). */
+   219→   219→function countMatchHistoryEntries(): number {
+   220→   220→  return loadMatchHistory().length;
+   221→   221→}
+   222→   222→
+   223→   223→/** Number of notification ids marked as read in the bell's read map. */
+   224→   224→function countReadNotificationIds(): number {
+   225→   225→  if (typeof window === "undefined") return 0;
+   226→   226→  try {
+   227→   227→    const raw = window.localStorage.getItem(NOTIFS_READ_KEY);
+   228→   228→    if (!raw) return 0;
+   229→   229→    const parsed: unknown = JSON.parse(raw);
+   230→   230→    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return 0;
+   231→   231→    return Object.keys(parsed as Record<string, unknown>).length;
+   232→   232→  } catch {
+   233→   233→    return 0;
+   234→   234→  }
+   235→   235→}
+   236→   236→
+   237→   237→interface ToolDataRowProps {
+   238→   238→  icon: LucideIcon;
+   239→   239→  /** Tinted icon-square classes, e.g. "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400". */
+   240→   240→  tintClass: string;
+   241→   241→  name: string;
+   242→   242→  description: string;
+   243→   243→  /** localStorage key shown as a mono chip on its own line. */
+   244→   244→  storageKey: string;
+   245→   245→  count: number;
+   246→   246→  confirmTitle: string;
+   247→   247→  confirmDescription: string;
+   248→   248→  confirmLabel: string;
+   249→   249→  onConfirm: () => void;
+   250→   250→}
+   251→   251→
+   252→   252→function ToolDataRow({
+   253→   253→  icon: Icon,
+   254→   254→  tintClass,
+   255→   255→  name,
+   256→   256→  description,
+   257→   257→  storageKey,
+   258→   258→  count,
+   259→   259→  confirmTitle,
+   260→   260→  confirmDescription,
+   261→   261→  confirmLabel,
+   262→   262→  onConfirm,
+   263→   263→}: ToolDataRowProps) {
+   264→   264→  const empty = count <= 0;
+   265→   265→  return (
+   266→   266→    <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+   267→   267→      <div className="flex min-w-0 flex-1 items-center gap-3">
+   268→   268→        <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", tintClass)}>
+   269→   269→          <Icon className="size-4" aria-hidden="true" />
+   270→   270→        </div>
+   271→   271→        <div className="min-w-0">
+   272→   272→          <p className="text-sm font-medium">{name}</p>
+   273→   273→          <p className="text-xs text-muted-foreground">{description}</p>
+   274→   274→          <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+   275→   275→            key
+   276→   276→            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">{storageKey}</code>
+   277→   277→          </p>
+   278→   278→        </div>
+   279→   279→      </div>
+   280→   280→      <div className="flex shrink-0 items-center gap-3">
+   281→   281→        <span
+   282→   282→          className={cn(
+   283→   283→            "whitespace-nowrap text-xs tabular-nums",
+   284→   284→            empty ? "italic text-muted-foreground/60" : "text-muted-foreground"
+   285→   285→          )}
+   286→   286→        >
+   287→   287→          {empty ? "0 items · empty" : `${count} item${count === 1 ? "" : "s"}`}
+   288→   288→        </span>
+   289→   289→        <AlertDialog>
+   290→   290→          <AlertDialogTrigger asChild>
+   291→   291→            <Button variant="outline" size="sm" disabled={empty} aria-label={`Clear ${name}`}>
+   292→   292→              Clear
+   293→   293→            </Button>
+   294→   294→          </AlertDialogTrigger>
+   295→   295→          <AlertDialogContent className="sm:max-w-sm">
+   296→   296→            <AlertDialogHeader>
+   297→   297→              <AlertDialogTitle>{confirmTitle}</AlertDialogTitle>
+   298→   298→              <AlertDialogDescription>{confirmDescription}</AlertDialogDescription>
+   299→   299→            </AlertDialogHeader>
+   300→   300→            <AlertDialogFooter>
+   301→   301→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+   302→   302→              <AlertDialogAction onClick={onConfirm}>{confirmLabel}</AlertDialogAction>
+   303→   303→            </AlertDialogFooter>
+   304→   304→          </AlertDialogContent>
+   305→   305→        </AlertDialog>
+   306→   306→      </div>
+   307→   307→    </div>
+   308→   308→  );
+   309→   309→}
+   310→   310→
+   311→   311→export default function SettingsPage() {
+   312→   312→  const mounted = useMounted();
+   313→   313→  const { theme, setTheme } = useTheme();
+   314→   314→  const activeResume = useActiveResume();
+   315→   315→  const resumes = useResumeStore((s) => s.resumes);
+   316→   316→  const activeResumeId = useResumeStore((s) => s.activeResumeId);
+   317→   317→  const applications = useResumeStore((s) => s.applications);
+   318→   318→  const scoreHistory = useResumeStore((s) => s.scoreHistory);
+   319→   319→  const updateResume = useResumeStore((s) => s.updateResume);
+   320→   320→  const resetAll = useResumeStore((s) => s.resetAll);
+   321→   321→  const importData = useResumeStore((s) => s.importData);
+   322→   322→  const coverLetterCount = useResumeStore((s) => s.coverLetterCount);
+   323→   323→
+   324→   324→  /* -------- Profile (local state only) -------- */
+   325→   325→  const [profile, setProfile] = React.useState({ name: "Alexander Chen", email: "alex.chen@email.com", role: "Senior Frontend Engineer" });
+   326→   326→
+   327→   327→  const handleSaveProfile = () => {
+   328→   328→    toast.success("Profile updated", { description: "Saved locally in your browser (demo)." });
+   329→   329→  };
+   330→   330→
+   331→   331→  /* -------- Notifications (local + localStorage) -------- */
+   332→   332→  const [prefs, setPrefs] = React.useState<Prefs>(DEFAULT_PREFS);
+   333→   333→
+   334→   334→  React.useEffect(() => {
+   335→   335→    try {
+   336→   336→      const raw = window.localStorage.getItem(NOTIFICATION_KEY);
+   337→   337→      if (raw) setPrefs((prev) => ({ ...prev, ...(JSON.parse(raw) as Partial<Prefs>) }));
+   338→   338→    } catch {
+   339→   339→      /* ignore corrupted prefs */
+   340→   340→    }
+   341→   341→  }, []);
+   342→   342→
+   343→   343→  React.useEffect(() => {
+   344→   344→    try {
+   345→   345→      window.localStorage.setItem(NOTIFICATION_KEY, JSON.stringify(prefs));
+   346→   346→    } catch {
+   347→   347→      /* storage unavailable — ignore */
+   348→   348→    }
+   349→   349→  }, [prefs]);
+   350→   350→
+   351→   351→  /* -------- Stored tool data (per-tool localStorage managers) -------- */
+   352→   352→  const [toolDataCounts, setToolDataCounts] = React.useState({ matchHistory: 0, readState: 0 });
+   353→   353→
+   354→   354→  const refreshToolDataCounts = React.useCallback(() => {
+   355→   355→    setToolDataCounts({
+   356→   356→      matchHistory: countMatchHistoryEntries(),
+   357→   357→      readState: countReadNotificationIds(),
+   358→   358→    });
+   359→   359→  }, []);
+   360→   360→
+   361→   361→  React.useEffect(() => {
+   362→   362→    refreshToolDataCounts();
+   363→   363→  }, [refreshToolDataCounts]);
+   364→   364→
+   365→   365→  /** Preference toggles that differ from DEFAULT_PREFS — the "App preferences" row count. */
+   366→   366→  const prefsCustomCount = React.useMemo(
+   367→   367→    () =>
+   368→   368→      (Object.keys(DEFAULT_PREFS) as Array<keyof Prefs>).filter((k) => prefs[k] !== DEFAULT_PREFS[k])
+   369→   369→        .length,
+   370→   370→    [prefs]
+   371→   371→  );
+   372→   372→
+   373→   373→  const handleClearMatchHistory = () => {
+   374→   374→    try {
+   375→   375→      window.localStorage.removeItem(MATCH_HISTORY_KEY);
+   376→   376→    } catch {
+   377→   377→      /* storage unavailable — nothing to clear */
+   378→   378→    }
+   379→   379→    refreshToolDataCounts();
+   380→   380→    toast.success("Match history cleared", { description: "Recent match analyses were removed from this browser." });
+   381→   381→  };
+   382→   382→
+   383→   383→  const handleClearReadState = () => {
+   384→   384→    try {
+   385→   385→      window.localStorage.removeItem(NOTIFS_READ_KEY);
+   386→   386→    } catch {
+   387→   387→      /* storage unavailable — nothing to clear */
+   388→   388→    }
+   389→   389→    refreshToolDataCounts();
+   390→   390→    toast.success("Read state reset — all notifications appear unread again.");
+   391→   391→  };
+   392→   392→
+   393→   393→  const handleClearPrefs = () => {
+   394→   394→    /* setPrefs triggers the existing write-back effect, so localStorage re-syncs to defaults too. */
+   395→   395→    setPrefs(DEFAULT_PREFS);
+   396→   396→    toast.success("Preferences reset", { description: "Notification preferences are back to their defaults." });
+   397→   397→  };
+   398→   398→
+   399→   399→  /* -------- Data & privacy -------- */
+   400→   400→  const storageKb = React.useMemo(() => {
+   401→   401→    try {
+   402→   402→      const raw = window.localStorage.getItem(STORE_KEY);
+   403→   403→      const source =
+   404→   404→        raw ??
+   405→   405→        JSON.stringify({ resumes, activeResumeId, coverLetterCount, applications, scoreHistory });
+   406→   406→      return new TextEncoder().encode(source).length / 1024;
+   407→   407→    } catch {
+   408→   408→      return 0;
+   409→   409→    }
+   410→   410→  }, [resumes, activeResumeId, coverLetterCount, applications, scoreHistory]);
+   411→   411→
+   412→   412→  const storagePct = Math.min(100, (storageKb / STORAGE_QUOTA_KB) * 100);
+   413→   413→  const storagePctLabel = storageKb <= 0 ? "0" : storagePct < 1 ? "<1" : String(Math.round(storagePct));
+   414→   414→
+   415→   415→  const handleExportData = () => {
+   416→   416→    try {
+   417→   417→      const exportedAt = new Date().toISOString();
+   418→   418→      /* Backup format v2 — same v1 body (resumes / activeResumeId / coverLetterCount / exportedAt)
+   419→   419→         plus an informational meta block. The store's importData ignores meta, so v2 exports
+   420→   420→         still import into older builds and v1 backups keep importing here. */
+   421→   421→      const payload = {
+   422→   422→        app: "ResumeForge AI",
+   423→   423→        version: "2.0.0",
+   424→   424→        exportedAt, // kept top-level for v1 compatibility
+   425→   425→        activeResumeId: activeResumeId,
+   426→   426→        coverLetterCount,
+   427→   427→        resumes,
+   428→   428→        meta: {
+   429→   429→          exportedAt,
+   430→   430→          resumeCount: resumes.length,
+   431→   431→          applicationCount: applications.length,
+   432→   432→          scoreEntryCount: scoreHistory.length,
+   433→   433→          favorites: {
+   434→   434→            interview: readFavorites(),
+   435→   435→          },
+   436→   436→        },
+   437→   437→      };
+   438→   438→      downloadBlob(JSON.stringify(payload, null, 2), "resumeforge-backup.json", "application/json;charset=utf-8");
+   439→   439→      toast.success("Backup downloaded", { description: "resumeforge-backup.json — your full workspace as JSON." });
+   440→   440→    } catch {
+   441→   441→      toast.error("Export failed", { description: "Couldn't build the backup file." });
+   442→   442→    }
+   443→   443→  };
+   444→   444→
+   445→   445→  /* -------- Backup import (round-trip restore) -------- */
+   446→   446→  const [pendingImport, setPendingImport] = React.useState<ParsedBackup | null>(null);
+   447→   447→  const [dragOver, setDragOver] = React.useState(false);
+   448→   448→  const fileInputRef = React.useRef<HTMLInputElement>(null);
+   449→   449→
+   450→   450→  const handleFileChosen = React.useCallback(async (file: File) => {
+   451→   451→    if (file.size > MAX_BACKUP_BYTES) {
+   452→   452→      toast.error("Import failed", { description: "That file is larger than 10 MB — a ResumeForge backup is a small JSON file." });
+   453→   453→      return;
+   454→   454→    }
+   455→   455→    let text = "";
+   456→   456→    try {
+   457→   457→      text = await file.text();
+   458→   458→    } catch {
+   459→   459→      toast.error("Import failed", { description: "Couldn't read the file from disk. Try re-selecting it." });
+   460→   460→      return;
+   461→   461→    }
+   462→   462→    const result = parseBackupText(text);
+   463→   463→    if (!result.ok) {
+   464→   464→      toast.error("Import failed", { description: result.reason });
+   465→   465→      return;
+   466→   466→    }
+   467→   467→    setPendingImport(result.data);
+   468→   468→  }, []);
+   469→   469→
+   470→   470→  const handleConfirmImport = () => {
+   471→   471→    if (!pendingImport) return;
+   472→   472→    const count = importData(pendingImport.payload);
+   473→   473→    if (count < 0) {
+   474→   474→      toast.error("Import failed", { description: "The backup contents didn't pass validation in the store." });
+   475→   475→      return;
+   476→   476→    }
+   477→   477→    /* v2 backups carry interview favorites in meta — the store ignores meta on purpose,
+   478→   478→       so restore them to localStorage here (best effort, never blocks the import). */
+   479→   479→    let favoritesRestored: number | null = null;
+   480→   480→    if (pendingImport.formatVersion === "v2" && pendingImport.interviewFavorites !== null) {
+   481→   481→      if (writeFavorites(pendingImport.interviewFavorites)) {
+   482→   482→        favoritesRestored = pendingImport.interviewFavorites.length;
+   483→   483→      }
+   484→   484→    }
+   485→   485→    const favoritesNote = favoritesRestored !== null ? ` Interview favorites restored (${favoritesRestored}).` : "";
+   486→   486→    /* Graceful localStorage-quota handling: verify the workspace actually persisted. */
+   487→   487→    let persistedCount: number | null = null;
+   488→   488→    try {
+   489→   489→      const raw = window.localStorage.getItem(STORE_KEY);
+   490→   490→      if (raw) {
+   491→   491→        const persisted = JSON.parse(raw) as { state?: { resumes?: unknown } };
+   492→   492→        const state = persisted?.state;
+   493→   493→        persistedCount = state && Array.isArray(state.resumes) ? state.resumes.length : null;
+   494→   494→      }
+   495→   495→    } catch {
+   496→   496→      persistedCount = null;
+   497→   497→    }
+   498→   498→    if (persistedCount === count) {
+   499→   499→      toast.success("Workspace restored", {
+   500→   500→        description: `${count} resume${count === 1 ? "" : "s"} imported from backup.${favoritesNote}`,
+   501→   501→      });
+   502→   502→    } else {
+   503→   503→      toast.warning("Restored for this session", {
+   504→   504→        description: `Your browser couldn't save the imported workspace (storage may be full). ${count} resume${count === 1 ? "" : "s"} are active — export a fresh backup now.${favoritesNote}`,
+   505→   505→      });
+   506→   506→    }
+   507→   507→    setPendingImport(null);
+   508→   508→  };
+   509→   509→
+   510→   510→  const handleResetAll = () => {
+   511→   511→    resetAll();
+   512→   512→    toast.success("Workspace reset", { description: "The 3 sample resumes were restored." });
+   513→   513→  };
+   514→   514→
+   515→   515→  /* -------- Hydration gate: the persisted store (and localStorage meters) are client-only -------- */
+   516→   516→  if (!mounted) {
+   517→   517→    return (
+   518→   518→      <div className="mx-auto max-w-5xl" aria-busy="true" aria-label="Loading settings">
+   519→   519→        <div className="flex items-center gap-4">
+   520→   520→          <Skeleton className="size-12 rounded-xl" />
+   521→   521→          <div className="space-y-2">
+   522→   522→            <Skeleton className="h-3 w-24" />
+   523→   523→            <Skeleton className="h-7 w-44" />
+   524→   524→          </div>
+   525→   525→        </div>
+   526→   526→        <div className="mt-8 xl:grid xl:grid-cols-[190px_minmax(0,1fr)] xl:gap-10">
+   527→   527→          <Skeleton className="hidden h-72 w-[190px] rounded-lg xl:block" />
+   528→   528→          <div className="mx-auto w-full max-w-3xl space-y-6">
+   529→   529→            {Array.from({ length: 5 }).map((_, i) => (
+   530→   530→              <Skeleton key={i} className="h-44 w-full rounded-xl" />
+   531→   531→            ))}
+   532→   532→          </div>
+   533→   533→        </div>
+   534→   534→      </div>
+   535→   535→    );
+   536→   536→  }
+   537→   537→
+   538→   538→  return (
+   539→   539→    <div className="mx-auto max-w-5xl">
+   540→   540→      <PageHeader
+   541→   541→        icon={Settings2}
+   542→   542→        eyebrow="Account Tools"
+   543→   543→        title="Settings"
+   544→   544→        description="Tune your profile, theme, notifications and data — everything is stored locally in your browser."
+   545→   545→      />
+   546→   546→
+   547→   547→      <div className="mt-8 xl:grid xl:grid-cols-[190px_minmax(0,1fr)] xl:gap-10">
+   548→   548→        {/* Sticky side nav (xl+) */}
+   549→   549→        <nav className="hidden xl:block" aria-label="Settings sections">
+   550→   550→          <div className="sticky top-24 flex flex-col gap-0.5">
+   551→   551→            {NAV_SECTIONS.map(({ id, label, icon: Icon }) => (
+   552→   552→              <a
+   553→   553→                key={id}
+   554→   554→                href={`#${id}`}
+   555→   555→                onClick={(e) => {
+   556→   556→                  e.preventDefault();
+   557→   557→                  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+   558→   558→                }}
+   559→   559→                className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   560→   560→              >
+   561→   561→                <Icon className="size-4" aria-hidden="true" />
+   562→   562→                {label}
+   563→   563→              </a>
+   564→   564→            ))}
+   565→   565→          </div>
+   566→   566→        </nav>
+   567→   567→
+   568→   568→        <motion.div
+   569→   569→          variants={staggerContainer}
+   570→   570→          initial="hidden"
+   571→   571→          animate="show"
+   572→   572→          className="mx-auto w-full max-w-3xl space-y-6"
+   573→   573→        >
+   574→   574→          {/* ------------------------------ Profile ------------------------------ */}
+   575→   575→          <motion.section id="profile" variants={fadeUp} className="scroll-mt-24" aria-labelledby="profile-title">
+   576→   576→            <Card>
+   577→   577→              <CardHeader>
+   578→   578→                <CardTitle id="profile-title" className="text-base">
+   579→   579→                  Profile
+   580→   580→                </CardTitle>
+   581→   581→                <CardDescription>How you appear inside ResumeForge. Stored locally — this demo has no server.</CardDescription>
+   582→   582→              </CardHeader>
+   583→   583→              <CardContent className="flex flex-col gap-6">
+   584→   584→                <div className="flex items-center gap-4">
+   585→   585→                  <div
+   586→   586→                    className="font-display flex size-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-xl font-bold text-white shadow-md shadow-emerald-500/25"
+   587→   587→                    aria-hidden="true"
+   588→   588→                  >
+   589→   589→                    {initialsOf(profile.name)}
+   590→   590→                  </div>
+   591→   591→                  <div>
+   592→   592→                    <p className="text-sm font-medium">{profile.name || "Your name"}</p>
+   593→   593→                    <p className="text-sm text-muted-foreground">{profile.role || "Role"}</p>
+   594→   594→                  </div>
+   595→   595→                </div>
+   596→   596→                <div className="grid gap-4 sm:grid-cols-2">
+   597→   597→                  <div className="flex flex-col gap-1.5">
+   598→   598→                    <Label htmlFor="profile-name">Full name</Label>
+   599→   599→                    <Input
+   600→   600→                      id="profile-name"
+   601→   601→                      value={profile.name}
+   602→   602→                      onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
+   603→   603→                      autoComplete="name"
+   604→   604→                    />
+   605→   605→                  </div>
+   606→   606→                  <div className="flex flex-col gap-1.5">
+   607→   607→                    <Label htmlFor="profile-email">Email</Label>
+   608→   608→                    <Input
+   609→   609→                      id="profile-email"
+   610→   610→                      type="email"
+   611→   611→                      value={profile.email}
+   612→   612→                      onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))}
+   613→   613→                      autoComplete="email"
+   614→   614→                    />
+   615→   615→                  </div>
+   616→   616→                  <div className="flex flex-col gap-1.5 sm:col-span-2">
+   617→   617→                    <Label htmlFor="profile-role">Role</Label>
+   618→   618→                    <Input
+   619→   619→                      id="profile-role"
+   620→   620→                      value={profile.role}
+   621→   621→                      onChange={(e) => setProfile((p) => ({ ...p, role: e.target.value }))}
+   622→   622→                      placeholder="e.g. Senior Product Designer"
+   623→   623→                    />
+   624→   624→                  </div>
+   625→   625→                </div>
+   626→   626→                <div className="flex justify-end">
+   627→   627→                  <Button
+   628→   628→                    onClick={handleSaveProfile}
+   629→   629→                    className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-500/90 hover:to-teal-600/90"
+   630→   630→                  >
+   631→   631→                    <Save aria-hidden="true" />
+   632→   632→                    Save changes
+   633→   633→                  </Button>
+   634→   634→                </div>
+   635→   635→              </CardContent>
+   636→   636→            </Card>
+   637→   637→          </motion.section>
+   638→   638→
+   639→   639→          {/* ---------------------------- Appearance ----------------------------- */}
+   640→   640→          <motion.section id="appearance" variants={fadeUp} className="scroll-mt-24" aria-labelledby="appearance-title">
+   641→   641→            <Card>
+   642→   642→              <CardHeader>
+   643→   643→                <CardTitle id="appearance-title" className="text-base">
+   644→   644→                  Appearance
+   645→   645→                </CardTitle>
+   646→   646→                <CardDescription>Pick how ResumeForge looks, and the default accent for new highlights.</CardDescription>
+   647→   647→              </CardHeader>
+   648→   648→              <CardContent className="flex flex-col gap-6">
+   649→   649→                {/* Theme radio cards */}
+   650→   650→                <div className="flex flex-col gap-2">
+   651→   651→                  <span className="text-sm font-medium">Theme</span>
+   652→   652→                  <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label="Theme">
+   653→   653→                    {THEME_OPTIONS.map(({ value, label, icon: Icon, hint }) => {
+   654→   654→                      const selected = mounted && theme === value;
+   655→   655→                      return (
+   656→   656→                        <button
+   657→   657→                          key={value}
+   658→   658→                          type="button"
+   659→   659→                          role="radio"
+   660→   660→                          aria-checked={selected}
+   661→   661→                          onClick={() => setTheme(value)}
+   662→   662→                          className={cn(
+   663→   663→                            "flex flex-col items-center gap-1.5 rounded-lg border p-4 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   664→   664→                            selected
+   665→   665→                              ? "border-emerald-500/60 bg-emerald-500/[0.07] ring-1 ring-emerald-500/40"
+   666→   666→                              : "hover:bg-accent/50"
+   667→   667→                          )}
+   668→   668→                        >
+   669→   669→                          <Icon
+   670→   670→                            className={cn("size-5", selected ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}
+   671→   671→                            aria-hidden="true"
+   672→   672→                          />
+   673→   673→                          <span className="text-sm font-medium">{label}</span>
+   674→   674→                          <span className="text-[11px] leading-tight text-muted-foreground">{hint}</span>
+   675→   675→                        </button>
+   676→   676→                      );
+   677→   677→                    })}
+   678→   678→                  </div>
+   679→   679→                </div>
+   680→   680→
+   681→   681→                {/* Default accent */}
+   682→   682→                <div className="flex flex-col gap-2">
+   683→   683→                  <span className="text-sm font-medium">Default accent</span>
+   684→   684→                  <div className="flex flex-wrap items-center gap-2.5" role="radiogroup" aria-label="Default accent color">
+   685→   685→                    {ACCENT_PRESETS.map((preset) => {
+   686→   686→                      const selected = activeResume?.accent.toLowerCase() === preset.value.toLowerCase();
+   687→   687→                      return (
+   688→   688→                        <button
+   689→   689→                          key={preset.value}
+   690→   690→                          type="button"
+   691→   691→                          role="radio"
+   692→   692→                          aria-checked={selected}
+   693→   693→                          aria-label={`${preset.name} accent`}
+   694→   694→                          title={`${preset.name} — ${preset.value}`}
+   695→   695→                          disabled={!activeResume}
+   696→   696→                          onClick={() => {
+   697→   697→                            if (!activeResume) return;
+   698→   698→                            updateResume(activeResumeId, { accent: preset.value });
+   699→   699→                            toast.success(`${preset.name} accent applied`, { description: `Active resume: ${activeResume.title}` });
+   700→   700→                          }}
+   701→   701→                          className={cn(
+   702→   702→                            "flex size-8 items-center justify-center rounded-full transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40",
+   703→   703→                            selected && "scale-110"
+   704→   704→                          )}
+   705→   705→                          style={{ backgroundColor: preset.value }}
+   706→   706→                        >
+   707→   707→                          {selected ? <span className="size-2 rounded-full bg-white shadow" aria-hidden="true" /> : null}
+   708→   708→                        </button>
+   709→   709→                      );
+   710→   710→                    })}
+   711→   711→                  </div>
+   712→   712→                  <p className="text-xs text-muted-foreground">
+   713→   713→                    Applies to your active resume{activeResume ? ` — ${activeResume.title}` : ""}.
+   714→   714→                  </p>
+   715→   715→                </div>
+   716→   716→              </CardContent>
+   717→   717→            </Card>
+   718→   718→          </motion.section>
+   719→   719→
+   720→   720→          {/* ---------------------------- Notifications --------------------------- */}
+   721→   721→          <motion.section id="notifications" variants={fadeUp} className="scroll-mt-24" aria-labelledby="notifications-title">
+   722→   722→            <Card>
+   723→   723→              <CardHeader>
+   724→   724→                <CardTitle id="notifications-title" className="text-base">
+   725→   725→                  Notifications
+   726→   726→                </CardTitle>
+   727→   727→                <CardDescription>Saved automatically to this browser.</CardDescription>
+   728→   728→              </CardHeader>
+   729→   729→              <CardContent className="flex flex-col gap-3">
+   730→   730→                {NOTIFICATION_ROWS.map(({ key, title, description }) => (
+   731→   731→                  <div key={key} className="flex items-center justify-between gap-4 rounded-lg border p-4">
+   732→   732→                    <div className="min-w-0">
+   733→   733→                      <Label htmlFor={`pref-${key}`} className="text-sm font-medium">
+   734→   734→                        {title}
+   735→   735→                      </Label>
+   736→   736→                      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+   737→   737→                    </div>
+   738→   738→                    <Switch
+   739→   739→                      id={`pref-${key}`}
+   740→   740→                      checked={prefs[key]}
+   741→   741→                      onCheckedChange={(v) => setPrefs((p) => ({ ...p, [key]: v }))}
+   742→   742→                      aria-label={title}
+   743→   743→                    />
+   744→   744→                  </div>
+   745→   745→                ))}
+   746→   746→              </CardContent>
+   747→   747→            </Card>
+   748→   748→          </motion.section>
+   749→   749→
+   750→   750→          {/* ---------------------------- Data & privacy -------------------------- */}
+   751→   751→          <motion.section id="data" variants={fadeUp} className="flex flex-col gap-6 scroll-mt-24" aria-labelledby="data-title">
+   752→   752→            <Card>
+   753→   753→              <CardHeader>
+   754→   754→                <CardTitle id="data-title" className="text-base">
+   755→   755→                  Data &amp; privacy
+   756→   756→                </CardTitle>
+   757→   757→                <CardDescription>
+   758→   758→                  Everything lives in your browser&rsquo;s localStorage — nothing leaves your device.
+
+[showing lines 59-758 of 1137; use offset=759 with limit to continue reading]

@@ -1,0 +1,689 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { useRouter } from "next/navigation";
+     5→import { AnimatePresence, motion } from "framer-motion";
+     6→import { CheckSquare, Copy, LayoutGrid, List, Plus, Search, SearchX, Sparkles, Trash2, X } from "lucide-react";
+     7→import { toast } from "sonner";
+     8→import {
+     9→  ACCENT_PRESETS,
+    10→  TEMPLATE_META,
+    11→  useActiveResume,
+    12→  useResumeStore,
+    13→  type ResumeData,
+    14→  type TemplateId,
+    15→} from "@/lib/resume-store";
+    16→import { atsAnalyze } from "@/lib/mock-ai";
+    17→import { useMounted } from "@/lib/use-mounted";
+    18→import { cn } from "@/lib/utils";
+    19→import { Badge } from "@/components/ui/badge";
+    20→import { Button } from "@/components/ui/button";
+    21→import {
+    22→  AlertDialog,
+    23→  AlertDialogAction,
+    24→  AlertDialogCancel,
+    25→  AlertDialogContent,
+    26→  AlertDialogDescription,
+    27→  AlertDialogFooter,
+    28→  AlertDialogHeader,
+    29→  AlertDialogTitle,
+    30→} from "@/components/ui/alert-dialog";
+    31→import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+    32→import { Input } from "@/components/ui/input";
+    33→import { Label } from "@/components/ui/label";
+    34→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    35→import { Skeleton } from "@/components/ui/skeleton";
+    36→import { ResumeCard, ResumeListRow } from "@/components/dashboard/resume-card";
+    37→
+    38→/* ------------------------------------------------------------------ */
+    39→/* Types & constants                                                   */
+    40→/* ------------------------------------------------------------------ */
+    41→
+    42→type SortKey = "recent" | "name" | "ats";
+    43→type ViewMode = "grid" | "list";
+    44→
+    45→const TEMPLATE_IDS: TemplateId[] = ["modern", "classic", "minimal", "creative", "executive", "technical"];
+    46→
+    47→/* Mini colored thumbnail used in the template radio-cards */
+    48→function GlyphLine({ w, light = false }: { w: number; light?: boolean }) {
+    49→  return (
+    50→    <span
+    51→      className={cn(
+    52→        "block h-[3px] shrink-0 rounded-full",
+    53→        light ? "bg-white/75" : "bg-neutral-400/70 dark:bg-neutral-500/70"
+    54→      )}
+    55→      style={{ width: `${w}%` }}
+    56→    />
+    57→  );
+    58→}
+    59→
+    60→function TemplateGlyph({
+    61→  template,
+    62→  accent,
+    63→  className,
+    64→}: {
+    65→  template: TemplateId;
+    66→  accent: string;
+    67→  className?: string;
+    68→}) {
+    69→  const base =
+    70→    "h-16 w-full overflow-hidden rounded-md border border-black/5 bg-neutral-50 dark:border-white/10 dark:bg-neutral-900";
+    71→
+    72→  switch (template) {
+    73→    case "modern":
+    74→      return (
+    75→        <div className={cn(base, "flex gap-1.5", className)}>
+    76→          <div className="flex w-1/3 flex-col gap-1 p-1.5" style={{ backgroundColor: accent }}>
+    77→            <GlyphLine w={85} light />
+    78→            <GlyphLine w={65} light />
+    79→            <GlyphLine w={75} light />
+    80→            <GlyphLine w={55} light />
+    81→          </div>
+    82→          <div className="flex-1 space-y-1 pt-1.5 pr-1.5">
+    83→            <GlyphLine w={70} />
+    84→            <GlyphLine w={90} />
+    85→            <GlyphLine w={85} />
+    86→            <GlyphLine w={60} />
+    87→            <GlyphLine w={78} />
+    88→          </div>
+    89→        </div>
+    90→      );
+    91→    case "classic":
+    92→      return (
+    93→        <div className={cn(base, "flex flex-col items-center gap-1", className)}>
+    94→          <span className="mt-2 h-3.5 w-3.5 rounded-full border-2" style={{ borderColor: accent }} />
+    95→          <GlyphLine w={45} />
+    96→          <span className="my-0.5 h-px w-2/3" style={{ backgroundColor: accent }} />
+    97→          <GlyphLine w={80} />
+    98→          <GlyphLine w={65} />
+    99→        </div>
+   100→      );
+   101→    case "minimal":
+   102→      return (
+   103→        <div className={cn(base, "flex flex-col justify-center gap-1.5 px-3", className)}>
+   104→          <GlyphLine w={38} />
+   105→          <GlyphLine w={86} />
+   106→          <GlyphLine w={72} />
+   107→          <GlyphLine w={52} />
+   108→        </div>
+   109→      );
+   110→    case "creative":
+   111→      return (
+   112→        <div className={cn(base, "space-y-1.5", className)}>
+   113→          <div className="-mx-px -mt-px flex h-4 items-center px-1.5" style={{ backgroundColor: accent }}>
+   114→            <GlyphLine w={42} light />
+   115→          </div>
+   116→          <div className="flex justify-between gap-1 px-1">
+   117→            {[26, 20, 24, 16].map((w, i) => (
+   118→              <span
+   119→                key={i}
+   120→                className="h-2 rounded-full"
+   121→                style={{ width: `${w}%`, backgroundColor: `${accent}40` }}
+   122→              />
+   123→            ))}
+   124→          </div>
+   125→          <div className="space-y-1 px-1 pb-1">
+   126→            <GlyphLine w={88} />
+   127→            <GlyphLine w={66} />
+   128→          </div>
+   129→        </div>
+   130→      );
+   131→    case "executive":
+   132→      return (
+   133→        <div className={cn(base, "space-y-1.5", className)}>
+   134→          <div className="-mx-px -mt-px flex h-6 flex-col justify-center gap-1 bg-neutral-800 px-1.5 dark:bg-neutral-700">
+   135→            <GlyphLine w={46} light />
+   136→            <GlyphLine w={30} light />
+   137→          </div>
+   138→          <div className="flex gap-2 px-1.5 pb-1">
+   139→            <div className="flex-1 space-y-1">
+   140→              <GlyphLine w={92} />
+   141→              <GlyphLine w={78} />
+   142→            </div>
+   143→            <div className="flex-1 space-y-1">
+   144→              <GlyphLine w={92} />
+   145→              <GlyphLine w={70} />
+   146→            </div>
+   147→          </div>
+   148→        </div>
+   149→      );
+   150→    case "technical":
+   151→      return (
+   152→        <div className={cn(base, "grid grid-cols-2 gap-x-2 gap-y-1 p-2", className)}>
+   153→          {Array.from({ length: 8 }).map((_, i) => (
+   154→            <GlyphLine key={i} w={((i * 17) % 38) + 56} />
+   155→          ))}
+   156→        </div>
+   157→      );
+   158→  }
+   159→}
+   160→
+   161→/* ------------------------------------------------------------------ */
+   162→/* New Resume dialog                                                   */
+   163→/* ------------------------------------------------------------------ */
+   164→
+   165→function NewResumeDialog({
+   166→  open,
+   167→  onOpenChange,
+   168→}: {
+   169→  open: boolean;
+   170→  onOpenChange: (open: boolean) => void;
+   171→}) {
+   172→  const router = useRouter();
+   173→  const createResume = useResumeStore((s) => s.createResume);
+   174→  const [title, setTitle] = React.useState("");
+   175→  const [template, setTemplate] = React.useState<TemplateId>("modern");
+   176→  const [accent, setAccent] = React.useState(ACCENT_PRESETS[0].value);
+   177→
+   178→  const handleCreate = () => {
+   179→    createResume(title.trim() || "Untitled Resume", template, accent);
+   180→    onOpenChange(false);
+   181→    setTitle("");
+   182→    toast.success("Resume created", { description: "Opening it in the Resume Studio…" });
+   183→    router.push("/dashboard/builder");
+   184→  };
+   185→
+   186→  return (
+   187→    <Dialog open={open} onOpenChange={onOpenChange}>
+   188→      <DialogContent className="sm:max-w-lg">
+   189→        <DialogHeader>
+   190→          <DialogTitle className="font-display">Create a new resume</DialogTitle>
+   191→          <DialogDescription>
+   192→            Pick a starting template and accent color — you can change both anytime.
+   193→          </DialogDescription>
+   194→        </DialogHeader>
+   195→
+   196→        <div className="space-y-5">
+   197→          <div className="space-y-2">
+   198→            <Label htmlFor="new-resume-title">Resume title</Label>
+   199→            <Input
+   200→              id="new-resume-title"
+   201→              placeholder="e.g. Senior Frontend Engineer — Google"
+   202→              value={title}
+   203→              onChange={(e) => setTitle(e.target.value)}
+   204→              onKeyDown={(e) => {
+   205→                if (e.key === "Enter") handleCreate();
+   206→              }}
+   207→              autoFocus
+   208→            />
+   209→          </div>
+   210→
+   211→          <div className="space-y-2">
+   212→            <Label>Template</Label>
+   213→            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label="Template">
+   214→              {TEMPLATE_IDS.map((t) => (
+   215→                <button
+   216→                  key={t}
+   217→                  type="button"
+   218→                  role="radio"
+   219→                  aria-checked={template === t}
+   220→                  onClick={() => setTemplate(t)}
+   221→                  className={cn(
+   222→                    "rounded-lg border bg-card p-2 text-left transition-all hover:border-emerald-500/50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   223→                    template === t &&
+   224→                      "border-emerald-500 bg-emerald-500/[0.04] ring-2 ring-emerald-500/25"
+   225→                  )}
+   226→                >
+   227→                  <TemplateGlyph template={t} accent={accent} />
+   228→                  <p className="mt-1.5 text-[12px] font-medium">{TEMPLATE_META[t].name}</p>
+   229→                </button>
+   230→              ))}
+   231→            </div>
+   232→          </div>
+   233→
+   234→          <div className="space-y-2">
+   235→            <Label>Accent color</Label>
+   236→            <div className="flex flex-wrap gap-2.5">
+   237→              {ACCENT_PRESETS.map((preset) => (
+   238→                <button
+   239→                  key={preset.value}
+   240→                  type="button"
+   241→                  title={preset.name}
+   242→                  aria-label={`${preset.name} accent`}
+   243→                  aria-pressed={accent === preset.value}
+   244→                  onClick={() => setAccent(preset.value)}
+   245→                  className={cn(
+   246→                    "h-7 w-7 rounded-full border border-black/10 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:border-white/10",
+   247→                    accent === preset.value &&
+   248→                      "scale-110 ring-2 ring-emerald-500 ring-offset-2 ring-offset-background"
+   249→                  )}
+   250→                  style={{ backgroundColor: preset.value }}
+   251→                />
+   252→              ))}
+   253→            </div>
+   254→          </div>
+   255→        </div>
+   256→
+   257→        <DialogFooter>
+   258→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   259→            Cancel
+   260→          </Button>
+   261→          <Button
+   262→            onClick={handleCreate}
+   263→            className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   264→          >
+   265→            <Plus className="h-4 w-4" aria-hidden="true" /> Create resume
+   266→          </Button>
+   267→        </DialogFooter>
+   268→      </DialogContent>
+   269→    </Dialog>
+   270→  );
+   271→}
+   272→
+   273→/* ------------------------------------------------------------------ */
+   274→/* Skeleton                                                            */
+   275→/* ------------------------------------------------------------------ */
+   276→
+   277→function ResumesSkeleton() {
+   278→  return (
+   279→    <div className="space-y-6" aria-busy="true" aria-label="Loading resumes">
+   280→      <div className="flex flex-wrap items-center gap-3">
+   281→        <Skeleton className="h-8 w-52" />
+   282→        <div className="ml-auto flex gap-2">
+   283→          <Skeleton className="h-9 w-56" />
+   284→          <Skeleton className="h-9 w-40" />
+   285→          <Skeleton className="h-9 w-24" />
+   286→        </div>
+   287→      </div>
+   288→      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+   289→        {Array.from({ length: 6 }).map((_, i) => (
+   290→          <Skeleton key={i} className="h-[360px] rounded-xl" />
+   291→        ))}
+   292→      </div>
+   293→    </div>
+   294→  );
+   295→}
+   296→
+   297→/* ------------------------------------------------------------------ */
+   298→/* Page                                                                */
+   299→/* ------------------------------------------------------------------ */
+   300→
+   301→export default function MyResumesPage() {
+   302→  const mounted = useMounted();
+   303→  const resumes = useResumeStore((s) => s.resumes);
+   304→  const activeResumeId = useResumeStore((s) => s.activeResumeId);
+   305→  const active = useActiveResume();
+   306→  const duplicateResume = useResumeStore((s) => s.duplicateResume);
+   307→  const deleteResume = useResumeStore((s) => s.deleteResume);
+   308→
+   309→  const [query, setQuery] = React.useState("");
+   310→  const [sort, setSort] = React.useState<SortKey>("recent");
+   311→  const [view, setView] = React.useState<ViewMode>("grid");
+   312→  const [createOpen, setCreateOpen] = React.useState(false);
+   313→  const [selectMode, setSelectMode] = React.useState(false);
+   314→  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+   315→  const [confirmDelete, setConfirmDelete] = React.useState(false);
+   316→
+   317→  const scoreMap = React.useMemo(() => {
+   318→    const map = new Map<string, number>();
+   319→    for (const r of resumes) map.set(r.id, atsAnalyze(r).score);
+   320→    return map;
+   321→  }, [resumes]);
+   322→
+   323→  const visible = React.useMemo(() => {
+   324→    const q = query.trim().toLowerCase();
+   325→    const filtered = resumes.filter(
+   326→      (r) =>
+   327→        !q ||
+   328→        r.title.toLowerCase().includes(q) ||
+   329→        r.personal.fullName.toLowerCase().includes(q) ||
+   330→        r.personal.jobTitle.toLowerCase().includes(q)
+   331→    );
+   332→    const scoreOf = (id: string) => scoreMap.get(id) ?? 0;
+   333→    switch (sort) {
+   334→      case "name":
+   335→        return [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+   336→      case "ats":
+   337→        return [...filtered].sort((a, b) => scoreOf(b.id) - scoreOf(a.id));
+   338→      default:
+   339→        return [...filtered].sort((a, b) => b.updatedAt - a.updatedAt);
+   340→    }
+   341→  }, [resumes, query, sort, scoreMap]);
+   342→
+   343→  /* Keep the selection honest when resumes disappear (per-card deletes, resets) */
+   344→  React.useEffect(() => {
+   345→    setSelected((prev) => {
+   346→      if (prev.size === 0) return prev;
+   347→      const ids = new Set(resumes.map((r) => r.id));
+   348→      const next = new Set([...prev].filter((id) => ids.has(id)));
+   349→      return next.size === prev.size ? prev : next;
+   350→    });
+   351→  }, [resumes]);
+   352→
+   353→  const exitSelectMode = React.useCallback(() => {
+   354→    setSelectMode(false);
+   355→    setSelected(new Set());
+   356→  }, []);
+   357→
+   358→  const toggleSelect = React.useCallback((id: string) => {
+   359→    setSelected((prev) => {
+   360→      const next = new Set(prev);
+   361→      if (next.has(id)) next.delete(id);
+   362→      else next.add(id);
+   363→      return next;
+   364→    });
+   365→  }, []);
+   366→
+   367→  /* ESC exits selection mode — but never while an AlertDialog (bulk delete or
+   368→     per-card delete) is open. The listener runs in the CAPTURE phase so it sees
+   369→     the dialog before Radix's document-level handler closes it: Radix calls
+   370→     onOpenChange(false) synchronously during the Escape dispatch (React 19
+   371→     flush), so a bubble-phase DOM/state check would already observe the dialog
+   372→     as gone and wrongly exit selection mode. */
+   373→  React.useEffect(() => {
+   374→    if (!selectMode) return;
+   375→    const onKey = (e: KeyboardEvent) => {
+   376→      if (e.key !== "Escape") return;
+   377→      if (document.querySelector("[role=alertdialog]")) return;
+   378→      exitSelectMode();
+   379→    };
+   380→    window.addEventListener("keydown", onKey, true);
+   381→    return () => window.removeEventListener("keydown", onKey, true);
+   382→  }, [selectMode, exitSelectMode]);
+   383→
+   384→  const handleBulkDuplicate = () => {
+   385→    let ok = 0;
+   386→    for (const id of selected) {
+   387→      if (duplicateResume(id)) ok += 1;
+   388→    }
+   389→    if (ok > 0) {
+   390→      toast.success(`Duplicated ${ok} ${ok === 1 ? "resume" : "resumes"}`, {
+   391→        description: "Copies were added to the top of your list.",
+   392→      });
+   393→    }
+   394→    /* Selection mode stays ON and the same set stays selected so users can continue. */
+   395→  };
+   396→
+   397→  const handleBulkDelete = () => {
+   398→    const ids = [...selected];
+   399→    for (const id of ids) deleteResume(id);
+   400→    if (ids.length > 0) {
+   401→      toast.success(`Deleted ${ids.length} ${ids.length === 1 ? "resume" : "resumes"}`);
+   402→    }
+   403→    setConfirmDelete(false);
+   404→    setSelected(new Set());
+   405→    setSelectMode(false);
+   406→  };
+   407→
+   408→  if (!mounted) {
+   409→    return <ResumesSkeleton />;
+   410→  }
+   411→
+   412→  const hasAny = resumes.length > 0;
+   413→  const selectedCount = selected.size;
+   414→  const allVisibleSelected =
+   415→    visible.length > 0 && visible.every((r) => selected.has(r.id));
+   416→  const toggleSelectAll = () => {
+   417→    setSelected(allVisibleSelected ? new Set() : new Set(visible.map((r) => r.id)));
+   418→  };
+   419→
+   420→  return (
+   421→    <div className="mx-auto max-w-6xl">
+   422→      {/* Header row */}
+   423→      <header className="flex flex-wrap items-center gap-3">
+   424→        <div className="min-w-0">
+   425→          <h1 className="flex items-center gap-2 font-display text-2xl font-bold tracking-tight">
+   426→            My Resumes
+   427→            <Badge
+   428→              variant="secondary"
+   429→              className="rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+   430→            >
+   431→              {resumes.length}
+   432→            </Badge>
+   433→          </h1>
+   434→          <p className="mt-0.5 text-[13px] text-muted-foreground">
+   435→            Manage, duplicate and track every version of your resume.
+   436→          </p>
+   437→        </div>
+   438→
+   439→        <div className="ml-auto flex flex-wrap items-center gap-2">
+   440→          <div className="relative w-full sm:w-52">
+   441→            <Search
+   442→              className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+   443→              aria-hidden="true"
+   444→            />
+   445→            <Input
+   446→              value={query}
+   447→              onChange={(e) => setQuery(e.target.value)}
+   448→              placeholder="Search resumes…"
+   449→              aria-label="Search resumes"
+   450→              className="h-9 rounded-lg pl-8"
+   451→            />
+   452→          </div>
+   453→
+   454→          <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+   455→            <SelectTrigger className="h-9 w-[164px] rounded-lg" aria-label="Sort resumes">
+   456→              <SelectValue />
+   457→            </SelectTrigger>
+   458→            <SelectContent>
+   459→              <SelectItem value="recent">Recently edited</SelectItem>
+   460→              <SelectItem value="name">Name A-Z</SelectItem>
+   461→              <SelectItem value="ats">ATS score</SelectItem>
+   462→            </SelectContent>
+   463→          </Select>
+   464→
+   465→          <div
+   466→            className="flex items-center rounded-lg border p-0.5"
+   467→            role="group"
+   468→            aria-label="View mode"
+   469→          >
+   470→            <Button
+   471→              variant={view === "grid" ? "secondary" : "ghost"}
+   472→              size="icon"
+   473→              className="h-8 w-8"
+   474→              onClick={() => setView("grid")}
+   475→              aria-pressed={view === "grid"}
+   476→              aria-label="Grid view"
+   477→            >
+   478→              <LayoutGrid className="h-4 w-4" />
+   479→            </Button>
+   480→            <Button
+   481→              variant={view === "list" ? "secondary" : "ghost"}
+   482→              size="icon"
+   483→              className="h-8 w-8"
+   484→              onClick={() => setView("list")}
+   485→              aria-pressed={view === "list"}
+   486→              aria-label="List view"
+   487→            >
+   488→              <List className="h-4 w-4" />
+   489→            </Button>
+   490→          </div>
+   491→
+   492→          {selectMode && (
+   493→            <Button
+   494→              variant="outline"
+   495→              size="sm"
+   496→              className="h-9 rounded-lg"
+   497→              onClick={toggleSelectAll}
+   498→            >
+   499→              {allVisibleSelected ? "Deselect all" : "Select all"}
+   500→            </Button>
+   501→          )}
+   502→
+   503→          <Button
+   504→            variant="ghost"
+   505→            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+   506→            aria-pressed={selectMode}
+   507→            className="h-9 gap-1.5 rounded-lg"
+   508→          >
+   509→            {selectMode ? (
+   510→              <X className="h-4 w-4" aria-hidden="true" />
+   511→            ) : (
+   512→              <CheckSquare className="h-4 w-4" aria-hidden="true" />
+   513→            )}
+   514→            {selectMode ? "Cancel" : "Select"}
+   515→          </Button>
+   516→
+   517→          <Button
+   518→            onClick={() => setCreateOpen(true)}
+   519→            className="h-9 gap-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   520→          >
+   521→            <Plus className="h-4 w-4" aria-hidden="true" /> New Resume
+   522→          </Button>
+   523→        </div>
+   524→      </header>
+   525→
+   526→      {/* Active resume hint */}
+   527→      {active && (
+   528→        <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+   529→          <Sparkles className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+   530→          Active resume: <span className="font-medium text-foreground">{active.title}</span>
+   531→        </p>
+   532→      )}
+   533→
+   534→      {/* Content */}
+   535→      {!hasAny ? (
+   536→        <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-emerald-500/30 bg-emerald-500/[0.04] p-10 text-center">
+   537→          <h3 className="font-display text-lg font-bold tracking-tight">No resumes yet</h3>
+   538→          <p className="max-w-sm text-sm text-muted-foreground">
+   539→            Create your first resume to unlock the builder, ATS scanner and cover letters.
+   540→          </p>
+   541→          <Button
+   542→            onClick={() => setCreateOpen(true)}
+   543→            className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   544→          >
+   545→            <Plus className="h-4 w-4" aria-hidden="true" /> New Resume
+   546→          </Button>
+   547→        </div>
+   548→      ) : visible.length === 0 ? (
+   549→        <div className="mt-6 flex flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
+   550→          <SearchX className="h-8 w-8 text-muted-foreground/60" aria-hidden="true" />
+   551→          <p className="text-sm text-muted-foreground">
+   552→            No resumes match “{query}”. Try a different search.
+   553→          </p>
+   554→          <Button variant="outline" size="sm" onClick={() => setQuery("")}>
+   555→            Clear search
+   556→          </Button>
+   557→        </div>
+   558→      ) : view === "grid" ? (
+   559→        <div
+   560→          className={cn(
+   561→            "mt-6 grid min-h-[200px] max-h-[calc(100vh-250px)] gap-5 overflow-y-auto pr-1 scrollbar-thin sm:grid-cols-2 xl:grid-cols-3",
+   562→            selectMode ? "pb-36" : "pb-4"
+   563→          )}
+   564→          role="list"
+   565→          aria-label="Resumes grid"
+   566→        >
+   567→          {visible.map((r: ResumeData, i: number) => (
+   568→            <ResumeCard
+   569→              key={r.id}
+   570→              resume={r}
+   571→              isActive={r.id === activeResumeId}
+   572→              index={i}
+   573→              selectionMode={selectMode}
+   574→              selected={selected.has(r.id)}
+   575→              onToggleSelect={toggleSelect}
+   576→            />
+   577→          ))}
+   578→        </div>
+   579→      ) : (
+   580→        <div
+   581→          className={cn(
+   582→            "mt-6 min-h-[200px] max-h-[calc(100vh-250px)] space-y-3 overflow-y-auto pr-1 scrollbar-thin",
+   583→            selectMode ? "pb-36" : "pb-4"
+   584→          )}
+   585→          role="list"
+   586→          aria-label="Resumes list"
+   587→        >
+   588→          {visible.map((r: ResumeData, i: number) => (
+   589→            <ResumeListRow
+   590→              key={r.id}
+   591→              resume={r}
+   592→              isActive={r.id === activeResumeId}
+   593→              index={i}
+   594→              selectionMode={selectMode}
+   595→              selected={selected.has(r.id)}
+   596→              onToggleSelect={toggleSelect}
+   597→            />
+   598→          ))}
+   599→        </div>
+   600→      )}
+   601→
+   602→      <NewResumeDialog open={createOpen} onOpenChange={setCreateOpen} />
+   603→
+   604→      {/* Floating bulk action bar (multi-select mode) */}
+   605→      <AnimatePresence>
+   606→        {selectMode && (
+   607→          <motion.div
+   608→            key="bulk-bar"
+   609→            initial={{ y: 20, opacity: 0 }}
+   610→            animate={{ y: 0, opacity: 1 }}
+   611→            exit={{ y: 20, opacity: 0 }}
+   612→            transition={{ type: "spring", stiffness: 400, damping: 32 }}
+   613→            className="pointer-events-none fixed inset-x-0 bottom-20 z-50 flex justify-center px-4 pb-[env(safe-area-inset-bottom)]"
+   614→          >
+   615→            <div
+   616→              role="toolbar"
+   617→              aria-label="Bulk actions"
+   618→              className="pointer-events-auto flex items-center gap-2 rounded-full border bg-background/95 px-4 py-2.5 shadow-xl backdrop-blur"
+   619→            >
+   620→              <span
+   621→                className="whitespace-nowrap text-sm font-medium tabular-nums"
+   622→                aria-live="polite"
+   623→              >
+   624→                {selectedCount} selected
+   625→              </span>
+   626→
+   627→              <span className="h-5 w-px shrink-0 bg-border" aria-hidden="true" />
+   628→
+   629→              <Button
+   630→                variant="outline"
+   631→                size="sm"
+   632→                className="h-8 gap-1.5 rounded-full"
+   633→                disabled={selectedCount === 0}
+   634→                onClick={handleBulkDuplicate}
+   635→              >
+   636→                <Copy className="h-3.5 w-3.5" aria-hidden="true" /> Duplicate
+   637→              </Button>
+   638→
+   639→              <Button
+   640→                variant="outline"
+   641→                size="sm"
+   642→                disabled={selectedCount === 0}
+   643→                onClick={() => setConfirmDelete(true)}
+   644→                className="h-8 gap-1.5 rounded-full border-rose-500/40 text-rose-600 hover:border-rose-500/60 hover:bg-rose-500/10 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+   645→              >
+   646→                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Delete
+   647→              </Button>
+   648→
+   649→              <Button
+   650→                variant="ghost"
+   651→                size="icon"
+   652→                className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+   653→                onClick={exitSelectMode}
+   654→                aria-label="Exit selection mode"
+   655→              >
+   656→                <X className="h-4 w-4" aria-hidden="true" />
+   657→              </Button>
+   658→            </div>
+   659→          </motion.div>
+   660→        )}
+   661→      </AnimatePresence>
+   662→
+   663→      {/* Bulk delete confirmation */}
+   664→      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+   665→        <AlertDialogContent>
+   666→          <AlertDialogHeader>
+   667→            <AlertDialogTitle>
+   668→              Delete {selectedCount} {selectedCount === 1 ? "resume" : "resumes"}?
+   669→            </AlertDialogTitle>
+   670→            <AlertDialogDescription>
+   671→              This permanently removes {selectedCount === 1 ? "it" : "them"} and all of their
+   672→              content. This action cannot be undone.
+   673→            </AlertDialogDescription>
+   674→          </AlertDialogHeader>
+   675→          <AlertDialogFooter>
+   676→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   677→            <AlertDialogAction
+   678→              className="bg-destructive text-white hover:bg-destructive/90"
+   679→              onClick={handleBulkDelete}
+   680→            >
+   681→              Delete
+   682→            </AlertDialogAction>
+   683→          </AlertDialogFooter>
+   684→        </AlertDialogContent>
+   685→      </AlertDialog>
+   686→    </div>
+   687→  );
+   688→}
+   689→

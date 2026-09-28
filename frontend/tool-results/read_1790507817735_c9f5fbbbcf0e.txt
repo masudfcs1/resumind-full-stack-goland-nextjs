@@ -1,0 +1,1071 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import * as React from "react";
+     4→     4→import { motion } from "framer-motion";
+     5→     5→import { toast } from "sonner";
+     6→     6→import { useTheme } from "next-themes";
+     7→     7→import { format, isValid as isValidDate } from "date-fns";
+     8→     8→import {
+     9→     9→  Bell,
+    10→    10→  CheckCheck,
+    11→    11→  Database,
+    12→    12→  Download,
+    13→    13→  Heart,
+    14→    14→  History,
+    15→    15→  Info,
+    16→    16→  Monitor,
+    17→    17→  Moon,
+    18→    18→  Palette,
+    19→    19→  Save,
+    20→    20→  Settings2,
+    21→    21→  ShieldAlert,
+    22→    22→  SlidersHorizontal,
+    23→    23→  Sparkles,
+    24→    24→  Sun,
+    25→    25→  Trash2,
+    26→    26→  Upload,
+    27→    27→  UserRound,
+    28→    28→} from "lucide-react";
+    29→    29→import type { LucideIcon } from "lucide-react";
+    30→    30→import { ACCENT_PRESETS, useActiveResume, useResumeStore } from "@/lib/resume-store";
+    31→    31→import { useMounted } from "@/lib/use-mounted";
+    32→    32→import { loadMatchHistory } from "@/components/match/history";
+    33→    33→import { Button } from "@/components/ui/button";
+    34→    34→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    35→    35→import {
+    36→    36→  AlertDialog,
+    37→    37→  AlertDialogAction,
+    38→    38→  AlertDialogCancel,
+    39→    39→  AlertDialogContent,
+    40→    40→  AlertDialogDescription,
+    41→    41→  AlertDialogFooter,
+    42→    42→  AlertDialogHeader,
+    43→    43→  AlertDialogTitle,
+    44→    44→  AlertDialogTrigger,
+    45→    45→} from "@/components/ui/alert-dialog";
+    46→    46→import { Badge } from "@/components/ui/badge";
+    47→    47→import {
+    48→    48→  Dialog,
+    49→    49→  DialogContent,
+    50→    50→  DialogDescription,
+    51→    51→  DialogFooter,
+    52→    52→  DialogHeader,
+    53→    53→  DialogTitle,
+    54→    54→} from "@/components/ui/dialog";
+    55→    55→import { Input } from "@/components/ui/input";
+    56→    56→import { Label } from "@/components/ui/label";
+    57→    57→import { Skeleton } from "@/components/ui/skeleton";
+    58→    58→import { Switch } from "@/components/ui/switch";
+    59→    59→import { cn } from "@/lib/utils";
+    60→    60→import { PageHeader } from "@/components/account/page-header";
+    61→    61→import { fadeUp, fadeIn, staggerContainer } from "@/components/account/motion-presets";
+    62→    62→import { downloadBlob } from "@/components/account/download";
+    63→    63→
+    64→    64→/* ------------------------------ Local storage ----------------------------- */
+    65→    65→
+    66→    66→const NOTIFICATION_KEY = "resumeforge-notifications";
+    67→    67→const STORE_KEY = "resumeforge-store";
+    68→    68→const MATCH_HISTORY_KEY = "resumeforge-match-history";
+    69→    69→const NOTIFS_READ_KEY = "resumeforge-notifs-read-v2";
+    70→    70→const STORAGE_QUOTA_KB = 5120; // ~5 MB localStorage budget used for the usage meter
+    71→    71→const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
+    72→    72→
+    73→    73→const DEFAULT_PREFS = { digest: true, ats: true, templates: false, product: false };
+    74→    74→type Prefs = typeof DEFAULT_PREFS;
+    75→    75→
+    76→    76→const NOTIFICATION_ROWS: Array<{ key: keyof Prefs; title: string; description: string }> = [
+    77→    77→  { key: "digest", title: "Weekly job-match digest", description: "A Monday email with roles matched to your resumes." },
+    78→    78→  { key: "ats", title: "ATS score reminders", description: "Nudge me when a resume hasn't been scanned in 7 days." },
+    79→    79→  { key: "templates", title: "New template alerts", description: "Know the moment a fresh template lands in the gallery." },
+    80→    80→  { key: "product", title: "Product updates", description: "Occasional notes about new features and improvements." },
+    81→    81→];
+    82→    82→
+    83→    83→const THEME_OPTIONS = [
+    84→    84→  { value: "light", label: "Light", icon: Sun, hint: "Bright & crisp" },
+    85→    85→  { value: "dark", label: "Dark", icon: Moon, hint: "Easy on the eyes" },
+    86→    86→  { value: "system", label: "System", icon: Monitor, hint: "Match your OS" },
+    87→    87→] as const;
+    88→    88→
+    89→    89→const NAV_SECTIONS = [
+    90→    90→  { id: "profile", label: "Profile", icon: UserRound },
+    91→    91→  { id: "appearance", label: "Appearance", icon: Palette },
+    92→    92→  { id: "notifications", label: "Notifications", icon: Bell },
+    93→    93→  { id: "data", label: "Data & privacy", icon: Database },
+    94→    94→  { id: "danger", label: "Danger zone", icon: ShieldAlert },
+    95→    95→  { id: "about", label: "About", icon: Info },
+    96→    96→] as const;
+    97→    97→
+    98→    98→function initialsOf(name: string): string {
+    99→    99→  const parts = name.trim().split(/\s+/).filter(Boolean);
+   100→   100→  if (parts.length === 0) return "?";
+   101→   101→  return parts
+   102→   102→    .slice(0, 2)
+   103→   103→    .map((p) => p[0]!.toUpperCase())
+   104→   104→    .join("");
+   105→   105→}
+   106→   106→
+   107→   107→/* ------------------------------ Backup import ----------------------------- */
+   108→   108→
+   109→   109→interface ParsedBackup {
+   110→   110→  payload: Record<string, unknown>;
+   111→   111→  resumeCount: number;
+   112→   112→  applicationCount: number | null; // null = absent, store will fall back to seed applications
+   113→   113→  scoreHistoryCount: number | null; // null = absent, store will fall back to seed score history
+   114→   114→  exportedAt: string | null;
+   115→   115→}
+   116→   116→
+   117→   117→function parseBackupText(text: string): { ok: true; data: ParsedBackup } | { ok: false; reason: string } {
+   118→   118→  let parsed: unknown;
+   119→   119→  try {
+   120→   120→    parsed = JSON.parse(text);
+   121→   121→  } catch {
+   122→   122→    return { ok: false, reason: "That file isn't valid JSON. Export a fresh backup from Settings and try again." };
+   123→   123→  }
+   124→   124→  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+   125→   125→    return { ok: false, reason: "This doesn't look like a ResumeForge backup — expected a JSON object." };
+   126→   126→  }
+   127→   127→  const obj = parsed as Record<string, unknown>;
+   128→   128→  const rawResumes = Array.isArray(obj.resumes) ? obj.resumes : null;
+   129→   129→  if (obj.app !== "ResumeForge AI" && !rawResumes) {
+   130→   130→    return { ok: false, reason: "This doesn't look like a ResumeForge backup — the \"app\" marker and resumes array are missing." };
+   131→   131→  }
+   132→   132→  if (!rawResumes || rawResumes.length === 0) {
+   133→   133→    return { ok: false, reason: "The backup contains no resumes, so there is nothing to restore." };
+   134→   134→  }
+   135→   135→  for (let i = 0; i < rawResumes.length; i++) {
+   136→   136→    const entry: unknown = rawResumes[i];
+   137→   137→    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+   138→   138→      return { ok: false, reason: `Resume #${i + 1} in the backup is malformed (expected an object).` };
+   139→   139→    }
+   140→   140→    const rec = entry as Record<string, unknown>;
+   141→   141→    const titleOk = typeof rec.title === "string";
+   142→   142→    if (
+   143→   143→      typeof rec.id !== "string" ||
+   144→   144→      rec.id.trim() === "" ||
+   145→   145→      !titleOk ||
+   146→   146→      !rec.personal ||
+   147→   147→      typeof rec.personal !== "object" ||
+   148→   148→      Array.isArray(rec.personal)
+   149→   149→    ) {
+   150→   150→      const label = titleOk ? `"${rec.title}"` : `#${i + 1}`;
+   151→   151→      return {
+   152→   152→        ok: false,
+   153→   153→        reason: `Resume ${label} is missing an id, a title or personal details — the backup looks corrupted.`,
+   154→   154→      };
+   155→   155→    }
+   156→   156→  }
+   157→   157→  return {
+   158→   158→    ok: true,
+   159→   159→    data: {
+   160→   160→      payload: obj,
+   161→   161→      resumeCount: rawResumes.length,
+   162→   162→      applicationCount: Array.isArray(obj.applications) ? obj.applications.length : null,
+   163→   163→      scoreHistoryCount: Array.isArray(obj.scoreHistory) ? obj.scoreHistory.length : null,
+   164→   164→      exportedAt: typeof obj.exportedAt === "string" ? obj.exportedAt : null,
+   165→   165→    },
+   166→   166→  };
+   167→   167→}
+   168→   168→
+   169→   169→function formatBackupDate(iso: string | null): string {
+   170→   170→  if (!iso) return "Not recorded";
+   171→   171→  const date = new Date(iso);
+   172→   172→  if (!isValidDate(date)) return "Not recorded";
+   173→   173→  return format(date, "MMM d, yyyy 'at' h:mm a");
+   174→   174→}
+   175→   175→
+   176→   176→function SummaryRow({ label, value }: { label: string; value: string }) {
+   177→   177→  return (
+   178→   178→    <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2">
+   179→   179→      <span className="text-muted-foreground">{label}</span>
+   180→   180→      <span className="text-right font-medium tabular-nums">{value}</span>
+   181→   181→    </div>
+   182→   182→  );
+   183→   183→}
+   184→   184→
+   185→   185→/* --------------------------- Stored tool data ----------------------------- */
+   186→   186→
+   187→   187→/** Number of saved match analyses (reader lives in components/match/history.ts). */
+   188→   188→function countMatchHistoryEntries(): number {
+   189→   189→  return loadMatchHistory().length;
+   190→   190→}
+   191→   191→
+   192→   192→/** Number of notification ids marked as read in the bell's read map. */
+   193→   193→function countReadNotificationIds(): number {
+   194→   194→  if (typeof window === "undefined") return 0;
+   195→   195→  try {
+   196→   196→    const raw = window.localStorage.getItem(NOTIFS_READ_KEY);
+   197→   197→    if (!raw) return 0;
+   198→   198→    const parsed: unknown = JSON.parse(raw);
+   199→   199→    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return 0;
+   200→   200→    return Object.keys(parsed as Record<string, unknown>).length;
+   201→   201→  } catch {
+   202→   202→    return 0;
+   203→   203→  }
+   204→   204→}
+   205→   205→
+   206→   206→interface ToolDataRowProps {
+   207→   207→  icon: LucideIcon;
+   208→   208→  /** Tinted icon-square classes, e.g. "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400". */
+   209→   209→  tintClass: string;
+   210→   210→  name: string;
+   211→   211→  description: string;
+   212→   212→  /** localStorage key shown as a mono chip on its own line. */
+   213→   213→  storageKey: string;
+   214→   214→  count: number;
+   215→   215→  confirmTitle: string;
+   216→   216→  confirmDescription: string;
+   217→   217→  confirmLabel: string;
+   218→   218→  onConfirm: () => void;
+   219→   219→}
+   220→   220→
+   221→   221→function ToolDataRow({
+   222→   222→  icon: Icon,
+   223→   223→  tintClass,
+   224→   224→  name,
+   225→   225→  description,
+   226→   226→  storageKey,
+   227→   227→  count,
+   228→   228→  confirmTitle,
+   229→   229→  confirmDescription,
+   230→   230→  confirmLabel,
+   231→   231→  onConfirm,
+   232→   232→}: ToolDataRowProps) {
+   233→   233→  const empty = count <= 0;
+   234→   234→  return (
+   235→   235→    <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+   236→   236→      <div className="flex min-w-0 flex-1 items-center gap-3">
+   237→   237→        <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", tintClass)}>
+   238→   238→          <Icon className="size-4" aria-hidden="true" />
+   239→   239→        </div>
+   240→   240→        <div className="min-w-0">
+   241→   241→          <p className="text-sm font-medium">{name}</p>
+   242→   242→          <p className="text-xs text-muted-foreground">{description}</p>
+   243→   243→          <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+   244→   244→            key
+   245→   245→            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">{storageKey}</code>
+   246→   246→          </p>
+   247→   247→        </div>
+   248→   248→      </div>
+   249→   249→      <div className="flex shrink-0 items-center gap-3">
+   250→   250→        <span
+   251→   251→          className={cn(
+   252→   252→            "whitespace-nowrap text-xs tabular-nums",
+   253→   253→            empty ? "italic text-muted-foreground/60" : "text-muted-foreground"
+   254→   254→          )}
+   255→   255→        >
+   256→   256→          {empty ? "0 items · empty" : `${count} item${count === 1 ? "" : "s"}`}
+   257→   257→        </span>
+   258→   258→        <AlertDialog>
+   259→   259→          <AlertDialogTrigger asChild>
+   260→   260→            <Button variant="outline" size="sm" disabled={empty} aria-label={`Clear ${name}`}>
+   261→   261→              Clear
+   262→   262→            </Button>
+   263→   263→          </AlertDialogTrigger>
+   264→   264→          <AlertDialogContent className="sm:max-w-sm">
+   265→   265→            <AlertDialogHeader>
+   266→   266→              <AlertDialogTitle>{confirmTitle}</AlertDialogTitle>
+   267→   267→              <AlertDialogDescription>{confirmDescription}</AlertDialogDescription>
+   268→   268→            </AlertDialogHeader>
+   269→   269→            <AlertDialogFooter>
+   270→   270→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+   271→   271→              <AlertDialogAction onClick={onConfirm}>{confirmLabel}</AlertDialogAction>
+   272→   272→            </AlertDialogFooter>
+   273→   273→          </AlertDialogContent>
+   274→   274→        </AlertDialog>
+   275→   275→      </div>
+   276→   276→    </div>
+   277→   277→  );
+   278→   278→}
+   279→   279→
+   280→   280→export default function SettingsPage() {
+   281→   281→  const mounted = useMounted();
+   282→   282→  const { theme, setTheme } = useTheme();
+   283→   283→  const activeResume = useActiveResume();
+   284→   284→  const resumes = useResumeStore((s) => s.resumes);
+   285→   285→  const activeResumeId = useResumeStore((s) => s.activeResumeId);
+   286→   286→  const applications = useResumeStore((s) => s.applications);
+   287→   287→  const scoreHistory = useResumeStore((s) => s.scoreHistory);
+   288→   288→  const updateResume = useResumeStore((s) => s.updateResume);
+   289→   289→  const resetAll = useResumeStore((s) => s.resetAll);
+   290→   290→  const importData = useResumeStore((s) => s.importData);
+   291→   291→  const coverLetterCount = useResumeStore((s) => s.coverLetterCount);
+   292→   292→
+   293→   293→  /* -------- Profile (local state only) -------- */
+   294→   294→  const [profile, setProfile] = React.useState({ name: "Alexander Chen", email: "alex.chen@email.com", role: "Senior Frontend Engineer" });
+   295→   295→
+   296→   296→  const handleSaveProfile = () => {
+   297→   297→    toast.success("Profile updated", { description: "Saved locally in your browser (demo)." });
+   298→   298→  };
+   299→   299→
+   300→   300→  /* -------- Notifications (local + localStorage) -------- */
+   301→   301→  const [prefs, setPrefs] = React.useState<Prefs>(DEFAULT_PREFS);
+   302→   302→
+   303→   303→  React.useEffect(() => {
+   304→   304→    try {
+   305→   305→      const raw = window.localStorage.getItem(NOTIFICATION_KEY);
+   306→   306→      if (raw) setPrefs((prev) => ({ ...prev, ...(JSON.parse(raw) as Partial<Prefs>) }));
+   307→   307→    } catch {
+   308→   308→      /* ignore corrupted prefs */
+   309→   309→    }
+   310→   310→  }, []);
+   311→   311→
+   312→   312→  React.useEffect(() => {
+   313→   313→    try {
+   314→   314→      window.localStorage.setItem(NOTIFICATION_KEY, JSON.stringify(prefs));
+   315→   315→    } catch {
+   316→   316→      /* storage unavailable — ignore */
+   317→   317→    }
+   318→   318→  }, [prefs]);
+   319→   319→
+   320→   320→  /* -------- Stored tool data (per-tool localStorage managers) -------- */
+   321→   321→  const [toolDataCounts, setToolDataCounts] = React.useState({ matchHistory: 0, readState: 0 });
+   322→   322→
+   323→   323→  const refreshToolDataCounts = React.useCallback(() => {
+   324→   324→    setToolDataCounts({
+   325→   325→      matchHistory: countMatchHistoryEntries(),
+   326→   326→      readState: countReadNotificationIds(),
+   327→   327→    });
+   328→   328→  }, []);
+   329→   329→
+   330→   330→  React.useEffect(() => {
+   331→   331→    refreshToolDataCounts();
+   332→   332→  }, [refreshToolDataCounts]);
+   333→   333→
+   334→   334→  /** Preference toggles that differ from DEFAULT_PREFS — the "App preferences" row count. */
+   335→   335→  const prefsCustomCount = React.useMemo(
+   336→   336→    () =>
+   337→   337→      (Object.keys(DEFAULT_PREFS) as Array<keyof Prefs>).filter((k) => prefs[k] !== DEFAULT_PREFS[k])
+   338→   338→        .length,
+   339→   339→    [prefs]
+   340→   340→  );
+   341→   341→
+   342→   342→  const handleClearMatchHistory = () => {
+   343→   343→    try {
+   344→   344→      window.localStorage.removeItem(MATCH_HISTORY_KEY);
+   345→   345→    } catch {
+   346→   346→      /* storage unavailable — nothing to clear */
+   347→   347→    }
+   348→   348→    refreshToolDataCounts();
+   349→   349→    toast.success("Match history cleared", { description: "Recent match analyses were removed from this browser." });
+   350→   350→  };
+   351→   351→
+   352→   352→  const handleClearReadState = () => {
+   353→   353→    try {
+   354→   354→      window.localStorage.removeItem(NOTIFS_READ_KEY);
+   355→   355→    } catch {
+   356→   356→      /* storage unavailable — nothing to clear */
+   357→   357→    }
+   358→   358→    refreshToolDataCounts();
+   359→   359→    toast.success("Read state reset — all notifications appear unread again.");
+   360→   360→  };
+   361→   361→
+   362→   362→  const handleClearPrefs = () => {
+   363→   363→    /* setPrefs triggers the existing write-back effect, so localStorage re-syncs to defaults too. */
+   364→   364→    setPrefs(DEFAULT_PREFS);
+   365→   365→    toast.success("Preferences reset", { description: "Notification preferences are back to their defaults." });
+   366→   366→  };
+   367→   367→
+   368→   368→  /* -------- Data & privacy -------- */
+   369→   369→  const storageKb = React.useMemo(() => {
+   370→   370→    try {
+   371→   371→      const raw = window.localStorage.getItem(STORE_KEY);
+   372→   372→      const source =
+   373→   373→        raw ??
+   374→   374→        JSON.stringify({ resumes, activeResumeId, coverLetterCount, applications, scoreHistory });
+   375→   375→      return new TextEncoder().encode(source).length / 1024;
+   376→   376→    } catch {
+   377→   377→      return 0;
+   378→   378→    }
+   379→   379→  }, [resumes, activeResumeId, coverLetterCount, applications, scoreHistory]);
+   380→   380→
+   381→   381→  const storagePct = Math.min(100, (storageKb / STORAGE_QUOTA_KB) * 100);
+   382→   382→  const storagePctLabel = storageKb <= 0 ? "0" : storagePct < 1 ? "<1" : String(Math.round(storagePct));
+   383→   383→
+   384→   384→  const handleExportData = () => {
+   385→   385→    try {
+   386→   386→      const payload = {
+   387→   387→        app: "ResumeForge AI",
+   388→   388→        version: "1.0.0",
+   389→   389→        exportedAt: new Date().toISOString(),
+   390→   390→        activeResumeId: activeResumeId,
+   391→   391→        coverLetterCount,
+   392→   392→        resumes,
+   393→   393→      };
+   394→   394→      downloadBlob(JSON.stringify(payload, null, 2), "resumeforge-backup.json", "application/json;charset=utf-8");
+   395→   395→      toast.success("Backup downloaded", { description: "resumeforge-backup.json — your full workspace as JSON." });
+   396→   396→    } catch {
+   397→   397→      toast.error("Export failed", { description: "Couldn't build the backup file." });
+   398→   398→    }
+   399→   399→  };
+   400→   400→
+   401→   401→  /* -------- Backup import (round-trip restore) -------- */
+   402→   402→  const [pendingImport, setPendingImport] = React.useState<ParsedBackup | null>(null);
+   403→   403→  const [dragOver, setDragOver] = React.useState(false);
+   404→   404→  const fileInputRef = React.useRef<HTMLInputElement>(null);
+   405→   405→
+   406→   406→  const handleFileChosen = React.useCallback(async (file: File) => {
+   407→   407→    if (file.size > MAX_BACKUP_BYTES) {
+   408→   408→      toast.error("Import failed", { description: "That file is larger than 10 MB — a ResumeForge backup is a small JSON file." });
+   409→   409→      return;
+   410→   410→    }
+   411→   411→    let text = "";
+   412→   412→    try {
+   413→   413→      text = await file.text();
+   414→   414→    } catch {
+   415→   415→      toast.error("Import failed", { description: "Couldn't read the file from disk. Try re-selecting it." });
+   416→   416→      return;
+   417→   417→    }
+   418→   418→    const result = parseBackupText(text);
+   419→   419→    if (!result.ok) {
+   420→   420→      toast.error("Import failed", { description: result.reason });
+   421→   421→      return;
+   422→   422→    }
+   423→   423→    setPendingImport(result.data);
+   424→   424→  }, []);
+   425→   425→
+   426→   426→  const handleConfirmImport = () => {
+   427→   427→    if (!pendingImport) return;
+   428→   428→    const count = importData(pendingImport.payload);
+   429→   429→    if (count < 0) {
+   430→   430→      toast.error("Import failed", { description: "The backup contents didn't pass validation in the store." });
+   431→   431→      return;
+   432→   432→    }
+   433→   433→    /* Graceful localStorage-quota handling: verify the workspace actually persisted. */
+   434→   434→    let persistedCount: number | null = null;
+   435→   435→    try {
+   436→   436→      const raw = window.localStorage.getItem(STORE_KEY);
+   437→   437→      if (raw) {
+   438→   438→        const persisted = JSON.parse(raw) as { state?: { resumes?: unknown } };
+   439→   439→        const state = persisted?.state;
+   440→   440→        persistedCount = state && Array.isArray(state.resumes) ? state.resumes.length : null;
+   441→   441→      }
+   442→   442→    } catch {
+   443→   443→      persistedCount = null;
+   444→   444→    }
+   445→   445→    if (persistedCount === count) {
+   446→   446→      toast.success("Workspace restored", {
+   447→   447→        description: `${count} resume${count === 1 ? "" : "s"} imported from backup.`,
+   448→   448→      });
+   449→   449→    } else {
+   450→   450→      toast.warning("Restored for this session", {
+   451→   451→        description: `Your browser couldn't save the imported workspace (storage may be full). ${count} resume${count === 1 ? "" : "s"} are active — export a fresh backup now.`,
+   452→   452→      });
+   453→   453→    }
+   454→   454→    setPendingImport(null);
+   455→   455→  };
+   456→   456→
+   457→   457→  const handleResetAll = () => {
+   458→   458→    resetAll();
+   459→   459→    toast.success("Workspace reset", { description: "The 3 sample resumes were restored." });
+   460→   460→  };
+   461→   461→
+   462→   462→  /* -------- Hydration gate: the persisted store (and localStorage meters) are client-only -------- */
+   463→   463→  if (!mounted) {
+   464→   464→    return (
+   465→   465→      <div className="mx-auto max-w-5xl" aria-busy="true" aria-label="Loading settings">
+   466→   466→        <div className="flex items-center gap-4">
+   467→   467→          <Skeleton className="size-12 rounded-xl" />
+   468→   468→          <div className="space-y-2">
+   469→   469→            <Skeleton className="h-3 w-24" />
+   470→   470→            <Skeleton className="h-7 w-44" />
+   471→   471→          </div>
+   472→   472→        </div>
+   473→   473→        <div className="mt-8 xl:grid xl:grid-cols-[190px_minmax(0,1fr)] xl:gap-10">
+   474→   474→          <Skeleton className="hidden h-72 w-[190px] rounded-lg xl:block" />
+   475→   475→          <div className="mx-auto w-full max-w-3xl space-y-6">
+   476→   476→            {Array.from({ length: 5 }).map((_, i) => (
+   477→   477→              <Skeleton key={i} className="h-44 w-full rounded-xl" />
+   478→   478→            ))}
+   479→   479→          </div>
+   480→   480→        </div>
+   481→   481→      </div>
+   482→   482→    );
+   483→   483→  }
+   484→   484→
+   485→   485→  return (
+   486→   486→    <div className="mx-auto max-w-5xl">
+   487→   487→      <PageHeader
+   488→   488→        icon={Settings2}
+   489→   489→        eyebrow="Account Tools"
+   490→   490→        title="Settings"
+   491→   491→        description="Tune your profile, theme, notifications and data — everything is stored locally in your browser."
+   492→   492→      />
+   493→   493→
+   494→   494→      <div className="mt-8 xl:grid xl:grid-cols-[190px_minmax(0,1fr)] xl:gap-10">
+   495→   495→        {/* Sticky side nav (xl+) */}
+   496→   496→        <nav className="hidden xl:block" aria-label="Settings sections">
+   497→   497→          <div className="sticky top-24 flex flex-col gap-0.5">
+   498→   498→            {NAV_SECTIONS.map(({ id, label, icon: Icon }) => (
+   499→   499→              <a
+   500→   500→                key={id}
+   501→   501→                href={`#${id}`}
+   502→   502→                onClick={(e) => {
+   503→   503→                  e.preventDefault();
+   504→   504→                  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+   505→   505→                }}
+   506→   506→                className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   507→   507→              >
+   508→   508→                <Icon className="size-4" aria-hidden="true" />
+   509→   509→                {label}
+   510→   510→              </a>
+   511→   511→            ))}
+   512→   512→          </div>
+   513→   513→        </nav>
+   514→   514→
+   515→   515→        <motion.div
+   516→   516→          variants={staggerContainer}
+   517→   517→          initial="hidden"
+   518→   518→          animate="show"
+   519→   519→          className="mx-auto w-full max-w-3xl space-y-6"
+   520→   520→        >
+   521→   521→          {/* ------------------------------ Profile ------------------------------ */}
+   522→   522→          <motion.section id="profile" variants={fadeUp} className="scroll-mt-24" aria-labelledby="profile-title">
+   523→   523→            <Card>
+   524→   524→              <CardHeader>
+   525→   525→                <CardTitle id="profile-title" className="text-base">
+   526→   526→                  Profile
+   527→   527→                </CardTitle>
+   528→   528→                <CardDescription>How you appear inside ResumeForge. Stored locally — this demo has no server.</CardDescription>
+   529→   529→              </CardHeader>
+   530→   530→              <CardContent className="flex flex-col gap-6">
+   531→   531→                <div className="flex items-center gap-4">
+   532→   532→                  <div
+   533→   533→                    className="font-display flex size-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-xl font-bold text-white shadow-md shadow-emerald-500/25"
+   534→   534→                    aria-hidden="true"
+   535→   535→                  >
+   536→   536→                    {initialsOf(profile.name)}
+   537→   537→                  </div>
+   538→   538→                  <div>
+   539→   539→                    <p className="text-sm font-medium">{profile.name || "Your name"}</p>
+   540→   540→                    <p className="text-sm text-muted-foreground">{profile.role || "Role"}</p>
+   541→   541→                  </div>
+   542→   542→                </div>
+   543→   543→                <div className="grid gap-4 sm:grid-cols-2">
+   544→   544→                  <div className="flex flex-col gap-1.5">
+   545→   545→                    <Label htmlFor="profile-name">Full name</Label>
+   546→   546→                    <Input
+   547→   547→                      id="profile-name"
+   548→   548→                      value={profile.name}
+   549→   549→                      onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
+   550→   550→                      autoComplete="name"
+   551→   551→                    />
+   552→   552→                  </div>
+   553→   553→                  <div className="flex flex-col gap-1.5">
+   554→   554→                    <Label htmlFor="profile-email">Email</Label>
+   555→   555→                    <Input
+   556→   556→                      id="profile-email"
+   557→   557→                      type="email"
+   558→   558→                      value={profile.email}
+   559→   559→                      onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))}
+   560→   560→                      autoComplete="email"
+   561→   561→                    />
+   562→   562→                  </div>
+   563→   563→                  <div className="flex flex-col gap-1.5 sm:col-span-2">
+   564→   564→                    <Label htmlFor="profile-role">Role</Label>
+   565→   565→                    <Input
+   566→   566→                      id="profile-role"
+   567→   567→                      value={profile.role}
+   568→   568→                      onChange={(e) => setProfile((p) => ({ ...p, role: e.target.value }))}
+   569→   569→                      placeholder="e.g. Senior Product Designer"
+   570→   570→                    />
+   571→   571→                  </div>
+   572→   572→                </div>
+   573→   573→                <div className="flex justify-end">
+   574→   574→                  <Button
+   575→   575→                    onClick={handleSaveProfile}
+   576→   576→                    className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-500/90 hover:to-teal-600/90"
+   577→   577→                  >
+   578→   578→                    <Save aria-hidden="true" />
+   579→   579→                    Save changes
+   580→   580→                  </Button>
+   581→   581→                </div>
+   582→   582→              </CardContent>
+   583→   583→            </Card>
+   584→   584→          </motion.section>
+   585→   585→
+   586→   586→          {/* ---------------------------- Appearance ----------------------------- */}
+   587→   587→          <motion.section id="appearance" variants={fadeUp} className="scroll-mt-24" aria-labelledby="appearance-title">
+   588→   588→            <Card>
+   589→   589→              <CardHeader>
+   590→   590→                <CardTitle id="appearance-title" className="text-base">
+   591→   591→                  Appearance
+   592→   592→                </CardTitle>
+   593→   593→                <CardDescription>Pick how ResumeForge looks, and the default accent for new highlights.</CardDescription>
+   594→   594→              </CardHeader>
+   595→   595→              <CardContent className="flex flex-col gap-6">
+   596→   596→                {/* Theme radio cards */}
+   597→   597→                <div className="flex flex-col gap-2">
+   598→   598→                  <span className="text-sm font-medium">Theme</span>
+   599→   599→                  <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label="Theme">
+   600→   600→                    {THEME_OPTIONS.map(({ value, label, icon: Icon, hint }) => {
+   601→   601→                      const selected = mounted && theme === value;
+   602→   602→                      return (
+   603→   603→                        <button
+   604→   604→                          key={value}
+   605→   605→                          type="button"
+   606→   606→                          role="radio"
+   607→   607→                          aria-checked={selected}
+   608→   608→                          onClick={() => setTheme(value)}
+   609→   609→                          className={cn(
+   610→   610→                            "flex flex-col items-center gap-1.5 rounded-lg border p-4 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   611→   611→                            selected
+   612→   612→                              ? "border-emerald-500/60 bg-emerald-500/[0.07] ring-1 ring-emerald-500/40"
+   613→   613→                              : "hover:bg-accent/50"
+   614→   614→                          )}
+   615→   615→                        >
+   616→   616→                          <Icon
+   617→   617→                            className={cn("size-5", selected ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}
+   618→   618→                            aria-hidden="true"
+   619→   619→                          />
+   620→   620→                          <span className="text-sm font-medium">{label}</span>
+   621→   621→                          <span className="text-[11px] leading-tight text-muted-foreground">{hint}</span>
+   622→   622→                        </button>
+   623→   623→                      );
+   624→   624→                    })}
+   625→   625→                  </div>
+   626→   626→                </div>
+   627→   627→
+   628→   628→                {/* Default accent */}
+   629→   629→                <div className="flex flex-col gap-2">
+   630→   630→                  <span className="text-sm font-medium">Default accent</span>
+   631→   631→                  <div className="flex flex-wrap items-center gap-2.5" role="radiogroup" aria-label="Default accent color">
+   632→   632→                    {ACCENT_PRESETS.map((preset) => {
+   633→   633→                      const selected = activeResume?.accent.toLowerCase() === preset.value.toLowerCase();
+   634→   634→                      return (
+   635→   635→                        <button
+   636→   636→                          key={preset.value}
+   637→   637→                          type="button"
+   638→   638→                          role="radio"
+   639→   639→                          aria-checked={selected}
+   640→   640→                          aria-label={`${preset.name} accent`}
+   641→   641→                          title={`${preset.name} — ${preset.value}`}
+   642→   642→                          disabled={!activeResume}
+   643→   643→                          onClick={() => {
+   644→   644→                            if (!activeResume) return;
+   645→   645→                            updateResume(activeResumeId, { accent: preset.value });
+   646→   646→                            toast.success(`${preset.name} accent applied`, { description: `Active resume: ${activeResume.title}` });
+   647→   647→                          }}
+   648→   648→                          className={cn(
+   649→   649→                            "flex size-8 items-center justify-center rounded-full transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40",
+   650→   650→                            selected && "scale-110"
+   651→   651→                          )}
+   652→   652→                          style={{ backgroundColor: preset.value }}
+   653→   653→                        >
+   654→   654→                          {selected ? <span className="size-2 rounded-full bg-white shadow" aria-hidden="true" /> : null}
+   655→   655→                        </button>
+   656→   656→                      );
+   657→   657→                    })}
+   658→   658→                  </div>
+   659→   659→                  <p className="text-xs text-muted-foreground">
+   660→   660→                    Applies to your active resume{activeResume ? ` — ${activeResume.title}` : ""}.
+   661→   661→                  </p>
+   662→   662→                </div>
+   663→   663→              </CardContent>
+   664→   664→            </Card>
+   665→   665→          </motion.section>
+   666→   666→
+   667→   667→          {/* ---------------------------- Notifications --------------------------- */}
+   668→   668→          <motion.section id="notifications" variants={fadeUp} className="scroll-mt-24" aria-labelledby="notifications-title">
+   669→   669→            <Card>
+   670→   670→              <CardHeader>
+   671→   671→                <CardTitle id="notifications-title" className="text-base">
+   672→   672→                  Notifications
+   673→   673→                </CardTitle>
+   674→   674→                <CardDescription>Saved automatically to this browser.</CardDescription>
+   675→   675→              </CardHeader>
+   676→   676→              <CardContent className="flex flex-col gap-3">
+   677→   677→                {NOTIFICATION_ROWS.map(({ key, title, description }) => (
+   678→   678→                  <div key={key} className="flex items-center justify-between gap-4 rounded-lg border p-4">
+   679→   679→                    <div className="min-w-0">
+   680→   680→                      <Label htmlFor={`pref-${key}`} className="text-sm font-medium">
+   681→   681→                        {title}
+   682→   682→                      </Label>
+   683→   683→                      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+   684→   684→                    </div>
+   685→   685→                    <Switch
+   686→   686→                      id={`pref-${key}`}
+   687→   687→                      checked={prefs[key]}
+   688→   688→                      onCheckedChange={(v) => setPrefs((p) => ({ ...p, [key]: v }))}
+   689→   689→                      aria-label={title}
+   690→   690→                    />
+   691→   691→                  </div>
+   692→   692→                ))}
+   693→   693→              </CardContent>
+   694→   694→            </Card>
+   695→   695→          </motion.section>
+   696→   696→
+   697→   697→          {/* ---------------------------- Data & privacy -------------------------- */}
+   698→   698→          <motion.section id="data" variants={fadeUp} className="flex flex-col gap-6 scroll-mt-24" aria-labelledby="data-title">
+   699→   699→            <Card>
+   700→   700→              <CardHeader>
+   701→   701→                <CardTitle id="data-title" className="text-base">
+   702→   702→                  Data &amp; privacy
+   703→   703→                </CardTitle>
+   704→   704→                <CardDescription>
+   705→   705→                  Everything lives in your browser&rsquo;s localStorage — nothing leaves your device.
+   706→   706→                </CardDescription>
+   707→   707→              </CardHeader>
+   708→   708→              <CardContent className="flex flex-col gap-4">
+   709→   709→                <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+   710→   710→                  <div className="flex min-w-0 flex-1 items-center gap-3">
+   711→   711→                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+   712→   712→                      <Database className="size-4" aria-hidden="true" />
+   713→   713→                    </div>
+   714→   714→                    <div className="min-w-0">
+   715→   715→                      <p className="text-sm font-medium">LocalStorage usage</p>
+   716→   716→                      <p className="text-xs text-muted-foreground">
+   717→   717→                        ~{storageKb.toFixed(1)} KB · {resumes.length} resume{resumes.length === 1 ? "" : "s"} · key{" "}
+   718→   718→                        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">{STORE_KEY}</code>
+   719→   719→                      </p>
+   720→   720→                      {/* Storage-usage meter (4px track, emerald gradient fill) */}
+   721→   721→                      <div
+   722→   722→                        className="mt-2 flex items-center gap-3"
+   723→   723→                        role="progressbar"
+   724→   724→                        aria-label="LocalStorage usage relative to a roughly 5 MB quota"
+   725→   725→                        aria-valuemin={0}
+   726→   726→                        aria-valuemax={100}
+   727→   727→                        aria-valuenow={Math.round(storagePct)}
+   728→   728→                      >
+   729→   729→                        <div className="h-1 w-full max-w-56 overflow-hidden rounded-full bg-muted">
+   730→   730→                          <div
+   731→   731→                            className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-[width] duration-500 dark:from-emerald-400 dark:to-teal-400"
+   732→   732→                            style={{ width: `${storagePct}%` }}
+   733→   733→                          />
+   734→   734→                        </div>
+   735→   735→                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+   736→   736→                          {storagePctLabel}% of ~5 MB
+   737→   737→                        </span>
+   738→   738→                      </div>
+   739→   739→                    </div>
+   740→   740→                  </div>
+   741→   741→                  <Button variant="outline" onClick={handleExportData} aria-label="Export all data as JSON backup">
+   742→   742→                    <Download aria-hidden="true" />
+   743→   743→                    Export data
+   744→   744→                  </Button>
+   745→   745→                </div>
+   746→   746→
+   747→   747→                {/* Backup format versioning note (sits under the Export data button) */}
+   748→   748→                <p className="-mt-2.5 flex items-start justify-end gap-1.5 px-1 text-xs text-muted-foreground">
+   749→   749→                  <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+   750→   750→                  <span>Backups are versioned (app + version fields) — older exports stay importable.</span>
+   751→   751→                </p>
+   752→   752→
+   753→   753→                {/* Import backup (round-trip restore) */}
+   754→   754→                <motion.div variants={fadeIn} className="rounded-lg border p-4" aria-labelledby="import-title">
+   755→   755→                  <div className="flex items-center gap-3">
+   756→   756→                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+   757→   757→                      <Upload className="size-4" aria-hidden="true" />
+   758→   758→                    </div>
+   759→   759→                    <div>
+   760→   760→                      <p id="import-title" className="text-sm font-medium">
+   761→   761→                        Import backup
+   762→   762→                      </p>
+   763→   763→                      <p className="text-xs text-muted-foreground">
+   764→   764→                        Restore a <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">resumeforge-backup.json</code> you exported
+   765→   765→                        earlier.
+   766→   766→                      </p>
+   767→   767→                    </div>
+   768→   768→                  </div>
+   769→   769→
+   770→   770→                  <Label htmlFor="import-backup-input" className="sr-only">
+   771→   771→                    ResumeForge backup file (JSON)
+   772→   772→                  </Label>
+   773→   773→                  <input
+   774→   774→                    ref={fileInputRef}
+   775→   775→                    id="import-backup-input"
+   776→   776→                    type="file"
+   777→   777→                    accept="application/json,.json"
+   778→   778→                    className="sr-only"
+   779→   779→                    aria-label="ResumeForge backup file"
+   780→   780→                    onChange={(e) => {
+   781→   781→                      const file = e.target.files?.[0];
+   782→   782→                      e.target.value = ""; // allow re-selecting the same file
+   783→   783→                      if (file) void handleFileChosen(file);
+   784→   784→                    }}
+   785→   785→                  />
+   786→   786→
+   787→   787→                  <div
+   788→   788→                    role="button"
+   789→   789→                    tabIndex={0}
+   790→   790→                    aria-label="Import backup: drop resumeforge-backup.json here, or press Enter to browse for the file"
+   791→   791→                    aria-describedby="import-hint"
+   792→   792→                    onClick={() => fileInputRef.current?.click()}
+   793→   793→                    onKeyDown={(e) => {
+   794→   794→                      if (e.key === "Enter" || e.key === " ") {
+   795→   795→                        e.preventDefault();
+   796→   796→                        fileInputRef.current?.click();
+   797→   797→                      }
+   798→   798→                    }}
+   799→   799→                    onDragOver={(e) => {
+   800→   800→                      e.preventDefault();
+   801→   801→                      setDragOver(true);
+   802→   802→                    }}
+   803→   803→                    onDragLeave={(e) => {
+   804→   804→                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+   805→   805→                    }}
+   806→   806→                    onDrop={(e) => {
+   807→   807→                      e.preventDefault();
+   808→   808→                      setDragOver(false);
+   809→   809→                      const file = e.dataTransfer.files?.[0];
+   810→   810→                      if (file) void handleFileChosen(file);
+   811→   811→                    }}
+   812→   812→                    className={cn(
+   813→   813→                      "relative mt-4 flex cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-xl px-6 py-8 text-center transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   814→   814→                      dragOver
+   815→   815→                        ? "bg-emerald-500/[0.08] text-emerald-600 dark:bg-emerald-400/[0.08] dark:text-emerald-400"
+   816→   816→                        : "text-emerald-500/50 hover:bg-emerald-500/[0.03] hover:text-emerald-500/90 dark:text-emerald-400/40 dark:hover:text-emerald-400/70"
+   817→   817→                    )}
+   818→   818→                  >
+   819→   819→                    {/* Animated dashed border (CSS stroke-dashoffset loop) */}
+   820→   820→                    <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full">
+   821→   821→                      <rect
+   822→   822→                        x="1"
+   823→   823→                        y="1"
+   824→   824→                        rx="10"
+   825→   825→                        style={{ width: "calc(100% - 2px)", height: "calc(100% - 2px)" }}
+   826→   826→                        fill="none"
+   827→   827→                        stroke="currentColor"
+   828→   828→                        strokeWidth="2"
+   829→   829→                        strokeDasharray="10 8"
+   830→   830→                        className="dash-dance"
+   831→   831→                      />
+   832→   832→                    </svg>
+   833→   833→                    <div
+   834→   834→                      className={cn(
+   835→   835→                        "flex size-11 items-center justify-center rounded-full transition-colors",
+   836→   836→                        dragOver ? "bg-emerald-500/20 dark:bg-emerald-400/20" : "bg-emerald-500/10 dark:bg-emerald-400/10"
+   837→   837→                      )}
+   838→   838→                    >
+   839→   839→                      <Upload className="size-5" aria-hidden="true" />
+   840→   840→                    </div>
+   841→   841→                    <p className="text-sm font-medium text-foreground">
+   842→   842→                      Drop your <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">resumeforge-backup.json</code> here or{" "}
+   843→   843→                      <span className="underline decoration-emerald-500/60 decoration-dashed underline-offset-4">browse</span>
+   844→   844→                    </p>
+   845→   845→                    <p id="import-hint" className="text-xs text-muted-foreground">
+   846→   846→                      Restores resumes, applications, score history and counters. The file is read locally — nothing is uploaded.
+   847→   847→                    </p>
+   848→   848→                  </div>
+   849→   849→                </motion.div>
+   850→   850→
+   851→   851→                <p className="text-xs text-muted-foreground">
+   852→   852→                  Export produces <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">resumeforge-backup.json</code> — a full snapshot
+   853→   853→                  of your resumes, settings and counters. Importing the same file restores it exactly.
+   854→   854→                </p>
+   855→   855→              </CardContent>
+   856→   856→            </Card>
+   857→   857→
+   858→   858→            {/* Stored tool data — granular per-tool cleanup without touching the workspace */}
+   859→   859→            <Card aria-labelledby="tool-data-title">
+   860→   860→              <CardHeader>
+   861→   861→                <CardTitle id="tool-data-title" className="text-base">
+   862→   862→                  Stored tool data
+   863→   863→                </CardTitle>
+   864→   864→                <CardDescription>Granular cleanup — keep your resumes, clear the extras.</CardDescription>
+   865→   865→              </CardHeader>
+   866→   866→              <CardContent className="flex flex-col gap-3">
+   867→   867→                <ToolDataRow
+   868→   868→                  icon={History}
+   869→   869→                  tintClass="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   870→   870→                  name="Job Match history"
+   871→   871→                  description="Recent analyses from the Job Match Scanner."
+   872→   872→                  storageKey={MATCH_HISTORY_KEY}
+   873→   873→                  count={toolDataCounts.matchHistory}
+   874→   874→                  confirmTitle="Clear match history?"
+   875→   875→                  confirmDescription="This removes all recent match analyses stored in this browser. Your resumes and ATS scores are not affected."
+   876→   876→                  confirmLabel="Clear history"
+   877→   877→                  onConfirm={handleClearMatchHistory}
+   878→   878→                />
+   879→   879→                <ToolDataRow
+   880→   880→                  icon={CheckCheck}
+   881→   881→                  tintClass="bg-zinc-500/10 text-zinc-600 dark:text-zinc-400"
+   882→   882→                  name="Notification read-state"
+   883→   883→                  description="Ids of notifications you already read."
+   884→   884→                  storageKey={NOTIFS_READ_KEY}
+   885→   885→                  count={toolDataCounts.readState}
+   886→   886→                  confirmTitle="Reset read state?"
+   887→   887→                  confirmDescription="Every notification will appear unread again the next time you open the bell."
+   888→   888→                  confirmLabel="Reset read state"
+   889→   889→                  onConfirm={handleClearReadState}
+   890→   890→                />
+   891→   891→                <ToolDataRow
+   892→   892→                  icon={SlidersHorizontal}
+   893→   893→                  tintClass="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+   894→   894→                  name="App preferences"
+   895→   895→                  description="Notification toggles that differ from the defaults."
+   896→   896→                  storageKey={NOTIFICATION_KEY}
+   897→   897→                  count={prefsCustomCount}
+   898→   898→                  confirmTitle="Reset preferences?"
+   899→   899→                  confirmDescription="Notification toggles return to their defaults: weekly digest and ATS reminders on, template alerts and product updates off."
+   900→   900→                  confirmLabel="Reset to defaults"
+   901→   901→                  onConfirm={handleClearPrefs}
+   902→   902→                />
+   903→   903→              </CardContent>
+   904→   904→            </Card>
+   905→   905→          </motion.section>
+   906→   906→
+   907→   907→          {/* ----------------------------- Danger zone ---------------------------- */}
+   908→   908→          <motion.section id="danger" variants={fadeUp} className="scroll-mt-24" aria-labelledby="danger-title">
+   909→   909→            <Card className="border-rose-500/40 bg-rose-500/[0.03] dark:border-rose-500/30">
+   910→   910→              <CardHeader>
+   911→   911→                <CardTitle id="danger-title" className="flex items-center gap-2 text-base text-rose-600 dark:text-rose-400">
+   912→   912→                  <ShieldAlert className="size-4" aria-hidden="true" />
+   913→   913→                  Danger zone
+   914→   914→                </CardTitle>
+   915→   915→                <CardDescription className="text-rose-600/80 dark:text-rose-400/80">
+   916→   916→                  Irreversible actions — please be certain.
+   917→   917→                </CardDescription>
+   918→   918→              </CardHeader>
+   919→   919→              <CardContent className="flex flex-wrap items-center justify-between gap-4">
+   920→   920→                <div>
+   921→   921→                  <p className="text-sm font-medium">Reset all data</p>
+   922→   922→                  <p className="text-xs text-muted-foreground">
+   923→   923→                    This restores the 3 sample resumes and clears your changes.
+   924→   924→                  </p>
+   925→   925→                </div>
+   926→   926→                <AlertDialog>
+   927→   927→                  <AlertDialogTrigger asChild>
+   928→   928→                    <Button
+   929→   929→                      variant="outline"
+   930→   930→                      className="border-rose-500/50 text-rose-600 hover:bg-rose-500/10 hover:text-rose-600 dark:text-rose-400 dark:hover:text-rose-300"
+   931→   931→                      aria-label="Reset all data"
+   932→   932→                    >
+   933→   933→                      <Trash2 aria-hidden="true" />
+   934→   934→                      Reset all data
+   935→   935→                    </Button>
+   936→   936→                  </AlertDialogTrigger>
+   937→   937→                  <AlertDialogContent>
+   938→   938→                    <AlertDialogHeader>
+   939→   939→                      <AlertDialogTitle>Reset all data?</AlertDialogTitle>
+   940→   940→                      <AlertDialogDescription>
+   941→   941→                        This restores the 3 sample resumes and clears your changes. This action cannot be undone.
+   942→   942→                      </AlertDialogDescription>
+   943→   943→                    </AlertDialogHeader>
+   944→   944→                    <AlertDialogFooter>
+   945→   945→                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+   946→   946→                      <AlertDialogAction
+   947→   947→                        onClick={handleResetAll}
+   948→   948→                        className="bg-rose-600 text-white hover:bg-rose-600/90 focus-visible:ring-rose-500/40"
+   949→   949→                      >
+   950→   950→                        Yes, reset everything
+   951→   951→                      </AlertDialogAction>
+   952→   952→                    </AlertDialogFooter>
+   953→   953→                  </AlertDialogContent>
+   954→   954→                </AlertDialog>
+   955→   955→              </CardContent>
+   956→   956→            </Card>
+   957→   957→          </motion.section>
+   958→   958→
+   959→   959→          {/* -------------------------------- About ------------------------------- */}
+   960→   960→          <motion.section id="about" variants={fadeUp} className="scroll-mt-24" aria-labelledby="about-title">
+   961→   961→            <Card>
+   962→   962→              <CardHeader>
+   963→   963→                <CardTitle id="about-title" className="text-base">
+   964→   964→                  About
+   965→   965→                </CardTitle>
+   966→   966→              </CardHeader>
+   967→   967→              <CardContent className="flex flex-col gap-4">
+   968→   968→                <div className="flex items-center gap-3">
+   969→   969→                  <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
+   970→   970→                    <Sparkles className="size-5" aria-hidden="true" />
+   971→   971→                  </div>
+   972→   972→                  <div>
+   973→   973→                    <p className="font-display flex items-center gap-2 text-sm font-semibold">
+   974→   974→                      ResumeForge AI
+   975→   975→                      <Badge variant="secondary" className="font-mono text-[10px]">
+   976→   976→                        v1.0.0
+   977→   977→                      </Badge>
+   978→   978→                    </p>
+   979→   979→                    <p className="text-xs text-muted-foreground">Frontend-only demo · your data never leaves this browser</p>
+   980→   980→                  </div>
+   981→   981→                </div>
+   982→   982→                <div className="flex flex-wrap gap-1.5" aria-label="Features">
+   983→   983→                  {[
+   984→   984→                    "6 resume templates",
+   985→   985→                    "AI bullet writer",
+   986→   986→                    "ATS scanner",
+   987→   987→                    "Grammar check",
+   988→   988→                    "Cover letters",
+   989→   989→                    "LinkedIn import",
+   990→   990→                    "Portfolio generator",
+   991→   991→                  ].map((feature) => (
+   992→   992→                    <span key={feature} className="rounded-full border bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground">
+   993→   993→                      {feature}
+   994→   994→                    </span>
+   995→   995→                  ))}
+   996→   996→                </div>
+   997→   997→                <p className="flex items-center gap-1.5 border-t pt-4 text-xs text-muted-foreground">
+   998→   998→                  Built with Next.js 16 · Tailwind 4 · shadcn/ui · framer-motion
+   999→   999→                  <Heart className="size-3.5 fill-rose-500 text-rose-500" aria-label="love" />
+  1000→  1000→                </p>
+  1001→  1001→              </CardContent>
+  1002→  1002→            </Card>
+  1003→  1003→          </motion.section>
+  1004→  1004→        </motion.div>
+  1005→  1005→      </div>
+  1006→  1006→
+  1007→  1007→      {/* ------------------------- Import confirmation ------------------------- */}
+  1008→  1008→      <Dialog open={pendingImport !== null} onOpenChange={(open) => { if (!open) setPendingImport(null); }}>
+  1009→  1009→        <DialogContent className="sm:max-w-md">
+  1010→  1010→          <DialogHeader>
+  1011→  1011→            <DialogTitle className="flex items-center gap-2">
+  1012→  1012→              <Upload className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+  1013→  1013→              Restore this backup?
+  1014→  1014→            </DialogTitle>
+  1015→  1015→            <DialogDescription>Review the contents before they replace your current workspace.</DialogDescription>
+  1016→  1016→          </DialogHeader>
+  1017→  1017→          {pendingImport ? (
+  1018→  1018→            <div className="flex flex-col gap-2" role="list" aria-label="Backup contents">
+  1019→  1019→              <div role="listitem">
+  1020→  1020→                <SummaryRow label="Resumes" value={String(pendingImport.resumeCount)} />
+  1021→  1021→              </div>
+  1022→  1022→              <div role="listitem">
+  1023→  1023→                <SummaryRow
+  1024→  1024→                  label="Job applications"
+  1025→  1025→                  value={
+  1026→  1026→                    pendingImport.applicationCount !== null
+  1027→  1027→                      ? String(pendingImport.applicationCount)
+  1028→  1028→                      : "Resets to the 3 sample entries"
+  1029→  1029→                  }
+  1030→  1030→                />
+  1031→  1031→              </div>
+  1032→  1032→              <div role="listitem">
+  1033→  1033→                <SummaryRow
+  1034→  1034→                  label="Score history"
+  1035→  1035→                  value={
+  1036→  1036→                    pendingImport.scoreHistoryCount !== null
+  1037→  1037→                      ? `${pendingImport.scoreHistoryCount} entries`
+  1038→  1038→                      : "Resets to the 8 sample entries"
+  1039→  1039→                  }
+  1040→  1040→                />
+  1041→  1041→              </div>
+  1042→  1042→              <div role="listitem">
+  1043→  1043→                <SummaryRow label="Exported" value={formatBackupDate(pendingImport.exportedAt)} />
+  1044→  1044→              </div>
+  1045→  1045→            </div>
+  1046→  1046→          ) : null}
+  1047→  1047→          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/[0.06] p-3 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-400/[0.06] dark:text-amber-400">
+  1048→  1048→            <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+  1049→  1049→            <span>
+  1050→  1050→              This replaces your current workspace — all resumes, applications and score history will be overwritten. Export a fresh
+  1051→  1051→              backup first if you might need it.
+  1052→  1052→            </span>
+  1053→  1053→          </div>
+  1054→  1054→          <DialogFooter className="gap-2 sm:gap-2">
+  1055→  1055→            <Button variant="outline" onClick={() => setPendingImport(null)}>
+  1056→  1056→              Cancel
+  1057→  1057→            </Button>
+  1058→  1058→            <Button
+  1059→  1059→              onClick={handleConfirmImport}
+  1060→  1060→              className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-500/90 hover:to-teal-600/90"
+  1061→  1061→            >
+  1062→  1062→              <Upload aria-hidden="true" />
+  1063→  1063→              Restore workspace
+  1064→  1064→            </Button>
+  1065→  1065→          </DialogFooter>
+  1066→  1066→        </DialogContent>
+  1067→  1067→      </Dialog>
+  1068→  1068→    </div>
+  1069→  1069→  );
+  1070→  1070→}
+  1071→  1071→

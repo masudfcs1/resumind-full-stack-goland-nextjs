@@ -1,0 +1,1270 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { motion } from "framer-motion";
+     5→import { toast } from "sonner";
+     6→import { useTheme } from "next-themes";
+     7→import { format, isValid as isValidDate } from "date-fns";
+     8→import {
+     9→  Bell,
+    10→  CheckCheck,
+    11→  Database,
+    12→  Download,
+    13→  Heart,
+    14→  History,
+    15→  Info,
+    16→  Monitor,
+    17→  Moon,
+    18→  Palette,
+    19→  Save,
+    20→  Settings2,
+    21→  ShieldAlert,
+    22→  SlidersHorizontal,
+    23→  Sparkles,
+    24→  Sun,
+    25→  Trash2,
+    26→  Upload,
+    27→  UserRound,
+    28→} from "lucide-react";
+    29→import type { LucideIcon } from "lucide-react";
+    30→import { ACCENT_PRESETS, useActiveResume, useResumeStore } from "@/lib/resume-store";
+    31→import { useMounted } from "@/lib/use-mounted";
+    32→import { loadMatchHistory } from "@/components/match/history";
+    33→import { readFavorites, writeFavorites } from "@/components/interview/favorites";
+    34→import { Button } from "@/components/ui/button";
+    35→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    36→import {
+    37→  AlertDialog,
+    38→  AlertDialogAction,
+    39→  AlertDialogCancel,
+    40→  AlertDialogContent,
+    41→  AlertDialogDescription,
+    42→  AlertDialogFooter,
+    43→  AlertDialogHeader,
+    44→  AlertDialogTitle,
+    45→  AlertDialogTrigger,
+    46→} from "@/components/ui/alert-dialog";
+    47→import { Badge } from "@/components/ui/badge";
+    48→import {
+    49→  Dialog,
+    50→  DialogContent,
+    51→  DialogDescription,
+    52→  DialogFooter,
+    53→  DialogHeader,
+    54→  DialogTitle,
+    55→} from "@/components/ui/dialog";
+    56→import { Input } from "@/components/ui/input";
+    57→import { Label } from "@/components/ui/label";
+    58→import { Skeleton } from "@/components/ui/skeleton";
+    59→import { Switch } from "@/components/ui/switch";
+    60→import { cn } from "@/lib/utils";
+    61→import { PageHeader } from "@/components/account/page-header";
+    62→import { fadeUp, fadeIn, staggerContainer } from "@/components/account/motion-presets";
+    63→import { downloadBlob } from "@/components/account/download";
+    64→
+    65→/* ------------------------------ Local storage ----------------------------- */
+    66→
+    67→const NOTIFICATION_KEY = "resumeforge-notifications";
+    68→const STORE_KEY = "resumeforge-store";
+    69→const MATCH_HISTORY_KEY = "resumeforge-match-history";
+    70→const NOTIFS_READ_KEY = "resumeforge-notifs-read-v2";
+    71→const STORAGE_QUOTA_KB = 5120; // ~5 MB localStorage budget used for the usage meter
+    72→const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
+    73→
+    74→const DEFAULT_PREFS = { digest: true, ats: true, templates: false, product: false };
+    75→type Prefs = typeof DEFAULT_PREFS;
+    76→
+    77→const NOTIFICATION_ROWS: Array<{ key: keyof Prefs; title: string; description: string }> = [
+    78→  { key: "digest", title: "Weekly job-match digest", description: "A Monday email with roles matched to your resumes." },
+    79→  { key: "ats", title: "ATS score reminders", description: "Nudge me when a resume hasn't been scanned in 7 days." },
+    80→  { key: "templates", title: "New template alerts", description: "Know the moment a fresh template lands in the gallery." },
+    81→  { key: "product", title: "Product updates", description: "Occasional notes about new features and improvements." },
+    82→];
+    83→
+    84→const THEME_OPTIONS = [
+    85→  { value: "light", label: "Light", icon: Sun, hint: "Bright & crisp" },
+    86→  { value: "dark", label: "Dark", icon: Moon, hint: "Easy on the eyes" },
+    87→  { value: "system", label: "System", icon: Monitor, hint: "Match your OS" },
+    88→] as const;
+    89→
+    90→const NAV_SECTIONS = [
+    91→  { id: "profile", label: "Profile", icon: UserRound },
+    92→  { id: "appearance", label: "Appearance", icon: Palette },
+    93→  { id: "notifications", label: "Notifications", icon: Bell },
+    94→  { id: "data", label: "Data & privacy", icon: Database },
+    95→  { id: "danger", label: "Danger zone", icon: ShieldAlert },
+    96→  { id: "about", label: "About", icon: Info },
+    97→] as const;
+    98→
+    99→function initialsOf(name: string): string {
+   100→  const parts = name.trim().split(/\s+/).filter(Boolean);
+   101→  if (parts.length === 0) return "?";
+   102→  return parts
+   103→    .slice(0, 2)
+   104→    .map((p) => p[0]!.toUpperCase())
+   105→    .join("");
+   106→}
+   107→
+   108→/* ------------------------------ Backup import ----------------------------- */
+   109→
+   110→interface ParsedBackup {
+   111→  payload: Record<string, unknown>;
+   112→  resumeCount: number;
+   113→  /** Resumes carrying a truthy archived flag. Old exports (v1 and pre-archive v2)
+   114→      never have the key, so they read as 0 archived — presentation only, the
+   115→      payload schema is untouched. */
+   116→  archivedResumeCount: number;
+   117→  applicationCount: number | null; // null = absent, store will fall back to seed applications
+   118→  scoreHistoryCount: number | null; // null = absent, store will fall back to seed score history
+   119→  exportedAt: string | null;
+   120→  /** "v2" when the backup carries a 2.x version string or a meta object, "v1" otherwise. */
+   121→  formatVersion: "v1" | "v2";
+   122→  /** Interview favorites from meta.favorites.interview — null when absent or malformed (v1 backups, bare v2). */
+   123→  interviewFavorites: string[] | null;
+   124→}
+   125→
+   126→function parseBackupText(text: string): { ok: true; data: ParsedBackup } | { ok: false; reason: string } {
+   127→  let parsed: unknown;
+   128→  try {
+   129→    parsed = JSON.parse(text);
+   130→  } catch {
+   131→    return { ok: false, reason: "That file isn't valid JSON. Export a fresh backup from Settings and try again." };
+   132→  }
+   133→  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+   134→    return { ok: false, reason: "This doesn't look like a ResumeForge backup — expected a JSON object." };
+   135→  }
+   136→  const obj = parsed as Record<string, unknown>;
+   137→  const rawResumes = Array.isArray(obj.resumes) ? obj.resumes : null;
+   138→  if (obj.app !== "ResumeForge AI" && !rawResumes) {
+   139→    return { ok: false, reason: "This doesn't look like a ResumeForge backup — the \"app\" marker and resumes array are missing." };
+   140→  }
+   141→  if (!rawResumes || rawResumes.length === 0) {
+   142→    return { ok: false, reason: "The backup contains no resumes, so there is nothing to restore." };
+   143→  }
+   144→  for (let i = 0; i < rawResumes.length; i++) {
+   145→    const entry: unknown = rawResumes[i];
+   146→    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+   147→      return { ok: false, reason: `Resume #${i + 1} in the backup is malformed (expected an object).` };
+   148→    }
+   149→    const rec = entry as Record<string, unknown>;
+   150→    const titleOk = typeof rec.title === "string";
+   151→    if (
+   152→      typeof rec.id !== "string" ||
+   153→      rec.id.trim() === "" ||
+   154→      !titleOk ||
+   155→      !rec.personal ||
+   156→      typeof rec.personal !== "object" ||
+   157→      Array.isArray(rec.personal)
+   158→    ) {
+   159→      const label = titleOk ? `"${rec.title}"` : `#${i + 1}`;
+   160→      return {
+   161→        ok: false,
+   162→        reason: `Resume ${label} is missing an id, a title or personal details — the backup looks corrupted.`,
+   163→      };
+   164→    }
+   165→  }
+   166→  /* Format detection (v1 vs v2): a 2.x version string or a meta object marks a v2 backup.
+   167→     Everything else — including versionless legacy exports — is treated as v1. */
+   168→  const rawMeta: unknown = obj.meta;
+   169→  const hasMeta = !!rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta);
+   170→  const versionIs2 = typeof obj.version === "string" && obj.version.trim().startsWith("2");
+   171→  const formatVersion: "v1" | "v2" = versionIs2 || hasMeta ? "v2" : "v1";
+   172→
+   173→  /* v2 extras: meta.favorites.interview is an optional array of company keys.
+   174→     Normalized the same way readFavorites() stores them (trim/lowercase/dedupe). */
+   175→  let interviewFavorites: string[] | null = null;
+   176→  if (formatVersion === "v2" && hasMeta) {
+   177→    const favorites: unknown = (rawMeta as Record<string, unknown>).favorites;
+   178→    if (favorites && typeof favorites === "object" && !Array.isArray(favorites)) {
+   179→      const interview: unknown = (favorites as Record<string, unknown>).interview;
+   180→      if (Array.isArray(interview)) {
+   181→        interviewFavorites = interview
+   182→          .filter((v): v is string => typeof v === "string")
+   183→          .map((v) => v.trim().toLowerCase())
+   184→          .filter((v) => v.length > 0)
+   185→          .filter((v, i, arr) => arr.indexOf(v) === i); // dedupe, keep first
+   186→      }
+   187→    }
+   188→  }
+   189→
+   190→  return {
+   191→    ok: true,
+   192→    data: {
+   193→      payload: obj,
+   194→      resumeCount: rawResumes.length,
+   195→      archivedResumeCount: rawResumes.reduce(
+   196→        (n, entry) =>
+   197→          n +
+   198→          (entry && typeof entry === "object" && !Array.isArray(entry) && !!(entry as Record<string, unknown>).archived
+   199→            ? 1
+   200→            : 0),
+   201→        0
+   202→      ),
+   203→      applicationCount: Array.isArray(obj.applications) ? obj.applications.length : null,
+   204→      scoreHistoryCount: Array.isArray(obj.scoreHistory) ? obj.scoreHistory.length : null,
+   205→      exportedAt: typeof obj.exportedAt === "string" ? obj.exportedAt : null,
+   206→      formatVersion,
+   207→      interviewFavorites,
+   208→    },
+   209→  };
+   210→}
+   211→
+   212→function formatBackupDate(iso: string | null): string {
+   213→  if (!iso) return "Not recorded";
+   214→  const date = new Date(iso);
+   215→  if (!isValidDate(date)) return "Not recorded";
+   216→  return format(date, "MMM d, yyyy 'at' h:mm a");
+   217→}
+   218→
+   219→function SummaryRow({ label, value }: { label: string; value: string }) {
+   220→  return (
+   221→    <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2">
+   222→      <span className="text-muted-foreground">{label}</span>
+   223→      <span className="text-right font-medium tabular-nums">{value}</span>
+   224→    </div>
+   225→  );
+   226→}
+   227→
+   228→/* --------------------------- Stored tool data ----------------------------- */
+   229→
+   230→/** Number of saved match analyses (reader lives in components/match/history.ts). */
+   231→function countMatchHistoryEntries(): number {
+   232→  return loadMatchHistory().length;
+   233→}
+   234→
+   235→/** Number of notification ids marked as read in the bell's read map. */
+   236→function countReadNotificationIds(): number {
+   237→  if (typeof window === "undefined") return 0;
+   238→  try {
+   239→    const raw = window.localStorage.getItem(NOTIFS_READ_KEY);
+   240→    if (!raw) return 0;
+   241→    const parsed: unknown = JSON.parse(raw);
+   242→    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return 0;
+   243→    return Object.keys(parsed as Record<string, unknown>).length;
+   244→  } catch {
+   245→    return 0;
+   246→  }
+   247→}
+   248→
+   249→interface ToolDataRowProps {
+   250→  icon: LucideIcon;
+   251→  /** Tinted icon-square classes, e.g. "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400". */
+   252→  tintClass: string;
+   253→  name: string;
+   254→  description: string;
+   255→  /** localStorage key shown as a mono chip on its own line. */
+   256→  storageKey: string;
+   257→  count: number;
+   258→  confirmTitle: string;
+   259→  confirmDescription: string;
+   260→  confirmLabel: string;
+   261→  onConfirm: () => void;
+   262→}
+   263→
+   264→function ToolDataRow({
+   265→  icon: Icon,
+   266→  tintClass,
+   267→  name,
+   268→  description,
+   269→  storageKey,
+   270→  count,
+   271→  confirmTitle,
+   272→  confirmDescription,
+   273→  confirmLabel,
+   274→  onConfirm,
+   275→}: ToolDataRowProps) {
+   276→  const empty = count <= 0;
+   277→  return (
+   278→    <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+   279→      <div className="flex min-w-0 flex-1 items-center gap-3">
+   280→        <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", tintClass)}>
+   281→          <Icon className="size-4" aria-hidden="true" />
+   282→        </div>
+   283→        <div className="min-w-0">
+   284→          <p className="text-sm font-medium">{name}</p>
+   285→          <p className="text-xs text-muted-foreground">{description}</p>
+   286→          <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+   287→            key
+   288→            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">{storageKey}</code>
+   289→          </p>
+   290→        </div>
+   291→      </div>
+   292→      <div className="flex shrink-0 items-center gap-3">
+   293→        <span
+   294→          className={cn(
+   295→            "whitespace-nowrap text-xs tabular-nums",
+   296→            empty ? "italic text-muted-foreground/60" : "text-muted-foreground"
+   297→          )}
+   298→        >
+   299→          {empty ? "0 items · empty" : `${count} item${count === 1 ? "" : "s"}`}
+   300→        </span>
+   301→        <AlertDialog>
+   302→          <AlertDialogTrigger asChild>
+   303→            <Button variant="outline" size="sm" disabled={empty} aria-label={`Clear ${name}`}>
+   304→              Clear
+   305→            </Button>
+   306→          </AlertDialogTrigger>
+   307→          <AlertDialogContent className="sm:max-w-sm">
+   308→            <AlertDialogHeader>
+   309→              <AlertDialogTitle>{confirmTitle}</AlertDialogTitle>
+   310→              <AlertDialogDescription>{confirmDescription}</AlertDialogDescription>
+   311→            </AlertDialogHeader>
+   312→            <AlertDialogFooter>
+   313→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+   314→              <AlertDialogAction onClick={onConfirm}>{confirmLabel}</AlertDialogAction>
+   315→            </AlertDialogFooter>
+   316→          </AlertDialogContent>
+   317→        </AlertDialog>
+   318→      </div>
+   319→    </div>
+   320→  );
+   321→}
+   322→
+   323→export default function SettingsPage() {
+   324→  const mounted = useMounted();
+   325→  const { theme, setTheme } = useTheme();
+   326→  const activeResume = useActiveResume();
+   327→  const resumes = useResumeStore((s) => s.resumes);
+   328→  const activeResumeId = useResumeStore((s) => s.activeResumeId);
+   329→  const applications = useResumeStore((s) => s.applications);
+   330→  const scoreHistory = useResumeStore((s) => s.scoreHistory);
+   331→  const updateResume = useResumeStore((s) => s.updateResume);
+   332→  const resetAll = useResumeStore((s) => s.resetAll);
+   333→  const importData = useResumeStore((s) => s.importData);
+   334→  const coverLetterCount = useResumeStore((s) => s.coverLetterCount);
+   335→
+   336→  /* -------- Profile (local state only) -------- */
+   337→  const [profile, setProfile] = React.useState({ name: "Alexander Chen", email: "alex.chen@email.com", role: "Senior Frontend Engineer" });
+   338→
+   339→  const handleSaveProfile = () => {
+   340→    toast.success("Profile updated", { description: "Saved locally in your browser (demo)." });
+   341→  };
+   342→
+   343→  /* -------- Notifications (local + localStorage) -------- */
+   344→  const [prefs, setPrefs] = React.useState<Prefs>(DEFAULT_PREFS);
+   345→
+   346→  React.useEffect(() => {
+   347→    try {
+   348→      const raw = window.localStorage.getItem(NOTIFICATION_KEY);
+   349→      if (raw) setPrefs((prev) => ({ ...prev, ...(JSON.parse(raw) as Partial<Prefs>) }));
+   350→    } catch {
+   351→      /* ignore corrupted prefs */
+   352→    }
+   353→  }, []);
+   354→
+   355→  React.useEffect(() => {
+   356→    try {
+   357→      window.localStorage.setItem(NOTIFICATION_KEY, JSON.stringify(prefs));
+   358→    } catch {
+   359→      /* storage unavailable — ignore */
+   360→    }
+   361→  }, [prefs]);
+   362→
+   363→  /* -------- Stored tool data (per-tool localStorage managers) -------- */
+   364→  const [toolDataCounts, setToolDataCounts] = React.useState({ matchHistory: 0, readState: 0 });
+   365→
+   366→  const refreshToolDataCounts = React.useCallback(() => {
+   367→    setToolDataCounts({
+   368→      matchHistory: countMatchHistoryEntries(),
+   369→      readState: countReadNotificationIds(),
+   370→    });
+   371→  }, []);
+   372→
+   373→  React.useEffect(() => {
+   374→    refreshToolDataCounts();
+   375→  }, [refreshToolDataCounts]);
+   376→
+   377→  /** Preference toggles that differ from DEFAULT_PREFS — the "App preferences" row count. */
+   378→  const prefsCustomCount = React.useMemo(
+   379→    () =>
+   380→      (Object.keys(DEFAULT_PREFS) as Array<keyof Prefs>).filter((k) => prefs[k] !== DEFAULT_PREFS[k])
+   381→        .length,
+   382→    [prefs]
+   383→  );
+   384→
+   385→  const handleClearMatchHistory = () => {
+   386→    try {
+   387→      window.localStorage.removeItem(MATCH_HISTORY_KEY);
+   388→    } catch {
+   389→      /* storage unavailable — nothing to clear */
+   390→    }
+   391→    refreshToolDataCounts();
+   392→    toast.success("Match history cleared", { description: "Recent match analyses were removed from this browser." });
+   393→  };
+   394→
+   395→  const handleClearReadState = () => {
+   396→    try {
+   397→      window.localStorage.removeItem(NOTIFS_READ_KEY);
+   398→    } catch {
+   399→      /* storage unavailable — nothing to clear */
+   400→    }
+   401→    refreshToolDataCounts();
+   402→    toast.success("Read state reset — all notifications appear unread again.");
+   403→  };
+   404→
+   405→  const handleClearPrefs = () => {
+   406→    /* setPrefs triggers the existing write-back effect, so localStorage re-syncs to defaults too. */
+   407→    setPrefs(DEFAULT_PREFS);
+   408→    toast.success("Preferences reset", { description: "Notification preferences are back to their defaults." });
+   409→  };
+   410→
+   411→  /* -------- Data & privacy -------- */
+   412→  const storageKb = React.useMemo(() => {
+   413→    try {
+   414→      const raw = window.localStorage.getItem(STORE_KEY);
+   415→      const source =
+   416→        raw ??
+   417→        JSON.stringify({ resumes, activeResumeId, coverLetterCount, applications, scoreHistory });
+   418→      return new TextEncoder().encode(source).length / 1024;
+   419→    } catch {
+   420→      return 0;
+   421→    }
+   422→  }, [resumes, activeResumeId, coverLetterCount, applications, scoreHistory]);
+   423→
+   424→  const storagePct = Math.min(100, (storageKb / STORAGE_QUOTA_KB) * 100);
+   425→  const storagePctLabel = storageKb <= 0 ? "0" : storagePct < 1 ? "<1" : String(Math.round(storagePct));
+   426→
+   427→  /* -------- Backup export (v2 meta review dialog → download) --------
+   428→     The snapshot is captured at open-time (event handler, never during render)
+   429→     so the dialog rows show exactly what the payload will contain. */
+   430→  interface ExportSnapshot {
+   431→    resumeCount: number;
+   432→    activeResumeCount: number;
+   433→    archivedResumeCount: number;
+   434→    coverLetterCount: number;
+   435→    applicationCount: number;
+   436→    scoreEntryCount: number;
+   437→    favoritesCount: number;
+   438→  }
+   439→  const [exportSnapshot, setExportSnapshot] = React.useState<ExportSnapshot | null>(null);
+   440→  /* Programmatic dialogs have no DialogTrigger, so Radix has no trigger to restore
+   441→     focus to — onCloseAutoFocus handlers below return focus explicitly. */
+   442→  const exportTriggerRef = React.useRef<HTMLButtonElement>(null);
+   443→
+   444→  const handleOpenExport = () => {
+   445→    const archived = resumes.reduce((n, r) => n + (r.archived ? 1 : 0), 0);
+   446→    let favoritesCount = 0;
+   447→    try {
+   448→      favoritesCount = readFavorites().length;
+   449→    } catch {
+   450→      favoritesCount = 0; // storage unavailable — the export itself degrades gracefully too
+   451→    }
+   452→    setExportSnapshot({
+   453→      resumeCount: resumes.length,
+   454→      activeResumeCount: resumes.length - archived,
+   455→      archivedResumeCount: archived,
+   456→      coverLetterCount,
+   457→      applicationCount: applications.length,
+   458→      scoreEntryCount: scoreHistory.length,
+   459→      favoritesCount,
+   460→    });
+   461→  };
+   462→
+   463→  const handleConfirmExport = () => {
+   464→    try {
+   465→      const exportedAt = new Date().toISOString();
+   466→      /* Backup format v2 — same v1 body (resumes / activeResumeId / coverLetterCount / exportedAt)
+   467→         plus an informational meta block. The store's importData ignores meta, so v2 exports
+   468→         still import into older builds and v1 backups keep importing here. The archived counts
+   469→         are additive informational fields only — the resume entries themselves are unchanged. */
+   470→      const archived = resumes.reduce((n, r) => n + (r.archived ? 1 : 0), 0);
+   471→      const payload = {
+   472→        app: "ResumeForge AI",
+   473→        version: "2.0.0",
+   474→        exportedAt, // kept top-level for v1 compatibility
+   475→        activeResumeId: activeResumeId,
+   476→        coverLetterCount,
+   477→        resumes,
+   478→        meta: {
+   479→          exportedAt,
+   480→          resumeCount: resumes.length,
+   481→          activeResumeCount: resumes.length - archived,
+   482→          archivedResumeCount: archived,
+   483→          applicationCount: applications.length,
+   484→          scoreEntryCount: scoreHistory.length,
+   485→          favorites: {
+   486→            interview: readFavorites(),
+   487→          },
+   488→        },
+   489→      };
+   490→      downloadBlob(JSON.stringify(payload, null, 2), "resumeforge-backup.json", "application/json;charset=utf-8");
+   491→      toast.success("Backup downloaded", { description: "resumeforge-backup.json — your full workspace as JSON." });
+   492→    } catch {
+   493→      toast.error("Export failed", { description: "Couldn't build the backup file." });
+   494→    } finally {
+   495→      setExportSnapshot(null);
+   496→    }
+   497→  };
+   498→
+   499→  /* -------- Backup import (round-trip restore) -------- */
+   500→  const [pendingImport, setPendingImport] = React.useState<ParsedBackup | null>(null);
+   501→  const [dragOver, setDragOver] = React.useState(false);
+   502→  const fileInputRef = React.useRef<HTMLInputElement>(null);
+   503→  const dropzoneRef = React.useRef<HTMLDivElement>(null);
+   504→
+   505→  const handleFileChosen = React.useCallback(async (file: File) => {
+   506→    if (file.size > MAX_BACKUP_BYTES) {
+   507→      toast.error("Import failed", { description: "That file is larger than 10 MB — a ResumeForge backup is a small JSON file." });
+   508→      return;
+   509→    }
+   510→    let text = "";
+   511→    try {
+   512→      text = await file.text();
+   513→    } catch {
+   514→      toast.error("Import failed", { description: "Couldn't read the file from disk. Try re-selecting it." });
+   515→      return;
+   516→    }
+   517→    const result = parseBackupText(text);
+   518→    if (!result.ok) {
+   519→      toast.error("Import failed", { description: result.reason });
+   520→      return;
+   521→    }
+   522→    setPendingImport(result.data);
+   523→  }, []);
+   524→
+   525→  const handleConfirmImport = () => {
+   526→    if (!pendingImport) return;
+   527→    const count = importData(pendingImport.payload);
+   528→    if (count < 0) {
+   529→      toast.error("Import failed", { description: "The backup contents didn't pass validation in the store." });
+   530→      return;
+   531→    }
+   532→    /* v2 backups carry interview favorites in meta — the store ignores meta on purpose,
+   533→       so restore them to localStorage here (best effort, never blocks the import). */
+   534→    let favoritesRestored: number | null = null;
+   535→    if (pendingImport.formatVersion === "v2" && pendingImport.interviewFavorites !== null) {
+   536→      if (writeFavorites(pendingImport.interviewFavorites)) {
+   537→        favoritesRestored = pendingImport.interviewFavorites.length;
+   538→      }
+   539→    }
+   540→    const favoritesNote = favoritesRestored !== null ? ` Interview favorites restored (${favoritesRestored}).` : "";
+   541→    /* Graceful localStorage-quota handling: verify the workspace actually persisted. */
+   542→    let persistedCount: number | null = null;
+   543→    try {
+   544→      const raw = window.localStorage.getItem(STORE_KEY);
+   545→      if (raw) {
+   546→        const persisted = JSON.parse(raw) as { state?: { resumes?: unknown } };
+   547→        const state = persisted?.state;
+   548→        persistedCount = state && Array.isArray(state.resumes) ? state.resumes.length : null;
+   549→      }
+   550→    } catch {
+   551→      persistedCount = null;
+   552→    }
+   553→    if (persistedCount === count) {
+   554→      toast.success("Workspace restored", {
+   555→        description: `${count} resume${count === 1 ? "" : "s"} imported from backup.${favoritesNote}`,
+   556→      });
+   557→    } else {
+   558→      toast.warning("Restored for this session", {
+   559→        description: `Your browser couldn't save the imported workspace (storage may be full). ${count} resume${count === 1 ? "" : "s"} are active — export a fresh backup now.${favoritesNote}`,
+   560→      });
+   561→    }
+   562→    setPendingImport(null);
+   563→  };
+   564→
+   565→  const handleResetAll = () => {
+   566→    resetAll();
+   567→    toast.success("Workspace reset", { description: "The 3 sample resumes were restored." });
+   568→  };
+   569→
+   570→  /* -------- Hydration gate: the persisted store (and localStorage meters) are client-only -------- */
+   571→  if (!mounted) {
+   572→    return (
+   573→      <div className="mx-auto max-w-5xl" aria-busy="true" aria-label="Loading settings">
+   574→        <div className="flex items-center gap-4">
+   575→          <Skeleton className="size-12 rounded-xl" />
+   576→          <div className="space-y-2">
+   577→            <Skeleton className="h-3 w-24" />
+   578→            <Skeleton className="h-7 w-44" />
+   579→          </div>
+   580→        </div>
+   581→        <div className="mt-8 xl:grid xl:grid-cols-[190px_minmax(0,1fr)] xl:gap-10">
+   582→          <Skeleton className="hidden h-72 w-[190px] rounded-lg xl:block" />
+   583→          <div className="mx-auto w-full max-w-3xl space-y-6">
+   584→            {Array.from({ length: 5 }).map((_, i) => (
+   585→              <Skeleton key={i} className="h-44 w-full rounded-xl" />
+   586→            ))}
+   587→          </div>
+   588→        </div>
+   589→      </div>
+   590→    );
+   591→  }
+   592→
+   593→  return (
+   594→    <div className="mx-auto max-w-5xl">
+   595→      <PageHeader
+   596→        icon={Settings2}
+   597→        eyebrow="Account Tools"
+   598→        title="Settings"
+   599→        description="Tune your profile, theme, notifications and data — everything is stored locally in your browser."
+   600→      />
+   601→
+   602→      <div className="mt-8 xl:grid xl:grid-cols-[190px_minmax(0,1fr)] xl:gap-10">
+   603→        {/* Sticky side nav (xl+) */}
+   604→        <nav className="hidden xl:block" aria-label="Settings sections">
+   605→          <div className="sticky top-24 flex flex-col gap-0.5">
+   606→            {NAV_SECTIONS.map(({ id, label, icon: Icon }) => (
+   607→              <a
+   608→                key={id}
+   609→                href={`#${id}`}
+   610→                onClick={(e) => {
+   611→                  e.preventDefault();
+   612→                  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+   613→                }}
+   614→                className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+   615→              >
+   616→                <Icon className="size-4" aria-hidden="true" />
+   617→                {label}
+   618→              </a>
+   619→            ))}
+   620→          </div>
+   621→        </nav>
+   622→
+   623→        <motion.div
+   624→          variants={staggerContainer}
+   625→          initial="hidden"
+   626→          animate="show"
+   627→          className="mx-auto w-full max-w-3xl space-y-6"
+   628→        >
+   629→          {/* ------------------------------ Profile ------------------------------ */}
+   630→          <motion.section id="profile" variants={fadeUp} className="scroll-mt-24" aria-labelledby="profile-title">
+   631→            <Card>
+   632→              <CardHeader>
+   633→                <CardTitle id="profile-title" className="text-base">
+   634→                  Profile
+   635→                </CardTitle>
+   636→                <CardDescription>How you appear inside ResumeForge. Stored locally — this demo has no server.</CardDescription>
+   637→              </CardHeader>
+   638→              <CardContent className="flex flex-col gap-6">
+   639→                <div className="flex items-center gap-4">
+   640→                  <div
+   641→                    className="font-display flex size-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-xl font-bold text-white shadow-md shadow-emerald-500/25"
+   642→                    aria-hidden="true"
+   643→                  >
+   644→                    {initialsOf(profile.name)}
+   645→                  </div>
+   646→                  <div>
+   647→                    <p className="text-sm font-medium">{profile.name || "Your name"}</p>
+   648→                    <p className="text-sm text-muted-foreground">{profile.role || "Role"}</p>
+   649→                  </div>
+   650→                </div>
+   651→                <div className="grid gap-4 sm:grid-cols-2">
+   652→                  <div className="flex flex-col gap-1.5">
+   653→                    <Label htmlFor="profile-name">Full name</Label>
+   654→                    <Input
+   655→                      id="profile-name"
+   656→                      value={profile.name}
+   657→                      onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
+   658→                      autoComplete="name"
+   659→                    />
+   660→                  </div>
+   661→                  <div className="flex flex-col gap-1.5">
+   662→                    <Label htmlFor="profile-email">Email</Label>
+   663→                    <Input
+   664→                      id="profile-email"
+   665→                      type="email"
+   666→                      value={profile.email}
+   667→                      onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))}
+   668→                      autoComplete="email"
+   669→                    />
+   670→                  </div>
+   671→                  <div className="flex flex-col gap-1.5 sm:col-span-2">
+   672→                    <Label htmlFor="profile-role">Role</Label>
+   673→                    <Input
+   674→                      id="profile-role"
+   675→                      value={profile.role}
+   676→                      onChange={(e) => setProfile((p) => ({ ...p, role: e.target.value }))}
+   677→                      placeholder="e.g. Senior Product Designer"
+   678→                    />
+   679→                  </div>
+   680→                </div>
+   681→                <div className="flex justify-end">
+   682→                  <Button
+   683→                    onClick={handleSaveProfile}
+   684→                    className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-500/90 hover:to-teal-600/90"
+   685→                  >
+   686→                    <Save aria-hidden="true" />
+   687→                    Save changes
+   688→                  </Button>
+   689→                </div>
+   690→              </CardContent>
+   691→            </Card>
+   692→          </motion.section>
+   693→
+   694→          {/* ---------------------------- Appearance ----------------------------- */}
+   695→          <motion.section id="appearance" variants={fadeUp} className="scroll-mt-24" aria-labelledby="appearance-title">
+   696→            <Card>
+   697→              <CardHeader>
+   698→                <CardTitle id="appearance-title" className="text-base">
+   699→                  Appearance
+   700→                </CardTitle>
+   701→                <CardDescription>Pick how ResumeForge looks, and the default accent for new highlights.</CardDescription>
+   702→              </CardHeader>
+   703→              <CardContent className="flex flex-col gap-6">
+   704→                {/* Theme radio cards */}
+   705→                <div className="flex flex-col gap-2">
+   706→                  <span className="text-sm font-medium">Theme</span>
+   707→                  <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label="Theme">
+   708→                    {THEME_OPTIONS.map(({ value, label, icon: Icon, hint }) => {
+   709→                      const selected = mounted && theme === value;
+   710→                      return (
+   711→                        <button
+   712→                          key={value}
+   713→                          type="button"
+   714→                          role="radio"
+   715→                          aria-checked={selected}
+   716→                          onClick={() => setTheme(value)}
+   717→                          className={cn(
+   718→                            "flex flex-col items-center gap-1.5 rounded-lg border p-4 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+   719→                            selected
+   720→                              ? "border-emerald-500/60 bg-emerald-500/[0.07] ring-1 ring-emerald-500/40"
+   721→                              : "hover:bg-accent/50"
+   722→                          )}
+   723→                        >
+   724→                          <Icon
+   725→                            className={cn("size-5", selected ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}
+   726→                            aria-hidden="true"
+   727→                          />
+   728→                          <span className="text-sm font-medium">{label}</span>
+   729→                          <span className="text-[11px] leading-tight text-muted-foreground">{hint}</span>
+   730→                        </button>
+   731→                      );
+   732→                    })}
+   733→                  </div>
+   734→                </div>
+   735→
+   736→                {/* Default accent */}
+   737→                <div className="flex flex-col gap-2">
+   738→                  <span className="text-sm font-medium">Default accent</span>
+   739→                  <div className="flex flex-wrap items-center gap-2.5" role="radiogroup" aria-label="Default accent color">
+   740→                    {ACCENT_PRESETS.map((preset) => {
+   741→                      const selected = activeResume?.accent.toLowerCase() === preset.value.toLowerCase();
+   742→                      return (
+   743→                        <button
+   744→                          key={preset.value}
+   745→                          type="button"
+   746→                          role="radio"
+   747→                          aria-checked={selected}
+   748→                          aria-label={`${preset.name} accent`}
+   749→                          title={`${preset.name} — ${preset.value}`}
+   750→                          disabled={!activeResume}
+   751→                          onClick={() => {
+   752→                            if (!activeResume) return;
+   753→                            updateResume(activeResumeId, { accent: preset.value });
+   754→                            toast.success(`${preset.name} accent applied`, { description: `Active resume: ${activeResume.title}` });
+   755→                          }}
+   756→                          className={cn(
+   757→                            "flex size-8 items-center justify-center rounded-full transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40",
+   758→                            selected && "scale-110"
+   759→                          )}
+   760→                          style={{ backgroundColor: preset.value }}
+   761→                        >
+   762→                          {selected ? <span className="size-2 rounded-full bg-white shadow" aria-hidden="true" /> : null}
+   763→                        </button>
+   764→                      );
+   765→                    })}
+   766→                  </div>
+   767→                  <p className="text-xs text-muted-foreground">
+   768→                    Applies to your active resume{activeResume ? ` — ${activeResume.title}` : ""}.
+   769→                  </p>
+   770→                </div>
+   771→              </CardContent>
+   772→            </Card>
+   773→          </motion.section>
+   774→
+   775→          {/* ---------------------------- Notifications --------------------------- */}
+   776→          <motion.section id="notifications" variants={fadeUp} className="scroll-mt-24" aria-labelledby="notifications-title">
+   777→            <Card>
+   778→              <CardHeader>
+   779→                <CardTitle id="notifications-title" className="text-base">
+   780→                  Notifications
+   781→                </CardTitle>
+   782→                <CardDescription>Saved automatically to this browser.</CardDescription>
+   783→              </CardHeader>
+   784→              <CardContent className="flex flex-col gap-3">
+   785→                {NOTIFICATION_ROWS.map(({ key, title, description }) => (
+   786→                  <div key={key} className="flex items-center justify-between gap-4 rounded-lg border p-4">
+   787→                    <div className="min-w-0">
+   788→                      <Label htmlFor={`pref-${key}`} className="text-sm font-medium">
+   789→                        {title}
+   790→                      </Label>
+   791→                      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+   792→                    </div>
+   793→                    <Switch
+   794→                      id={`pref-${key}`}
+   795→                      checked={prefs[key]}
+   796→                      onCheckedChange={(v) => setPrefs((p) => ({ ...p, [key]: v }))}
+   797→                      aria-label={title}
+   798→                    />
+   799→                  </div>
+   800→                ))}
+   801→              </CardContent>
+   802→            </Card>
+   803→          </motion.section>
+   804→
+   805→          {/* ---------------------------- Data & privacy -------------------------- */}
+   806→          <motion.section id="data" variants={fadeUp} className="flex flex-col gap-6 scroll-mt-24" aria-labelledby="data-title">
+   807→            <Card>
+   808→              <CardHeader>
+   809→                <CardTitle id="data-title" className="text-base">
+   810→                  Data &amp; privacy
+   811→                </CardTitle>
+   812→                <CardDescription>
+   813→                  Everything lives in your browser&rsquo;s localStorage — nothing leaves your device.
+   814→                </CardDescription>
+   815→              </CardHeader>
+   816→              <CardContent className="flex flex-col gap-4">
+   817→                <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+   818→                  <div className="flex min-w-0 flex-1 items-center gap-3">
+   819→                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+   820→                      <Database className="size-4" aria-hidden="true" />
+   821→                    </div>
+   822→                    <div className="min-w-0">
+   823→                      <p className="text-sm font-medium">LocalStorage usage</p>
+   824→                      <p className="text-xs text-muted-foreground">
+   825→                        ~{storageKb.toFixed(1)} KB · {resumes.length} resume{resumes.length === 1 ? "" : "s"} · key{" "}
+   826→                        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">{STORE_KEY}</code>
+   827→                      </p>
+   828→                      {/* Storage-usage meter (4px track, emerald gradient fill) */}
+   829→                      <div
+   830→                        className="mt-2 flex items-center gap-3"
+   831→                        role="progressbar"
+   832→                        aria-label="LocalStorage usage relative to a roughly 5 MB quota"
+   833→                        aria-valuemin={0}
+   834→                        aria-valuemax={100}
+   835→                        aria-valuenow={Math.round(storagePct)}
+   836→                        aria-valuetext={`${storagePctLabel}% of ~5 MB used (${storageKb.toFixed(1)} KB)`}
+   837→                      >
+   838→                        <div className="h-1 w-full max-w-56 overflow-hidden rounded-full bg-muted">
+   839→                          <div
+   840→                            className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-[width] duration-500 dark:from-emerald-400 dark:to-teal-400"
+   841→                            style={{ width: `${storagePct}%` }}
+   842→                          />
+   843→                        </div>
+   844→                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+   845→                          {storagePctLabel}% of ~5 MB
+   846→                        </span>
+   847→                      </div>
+   848→                    </div>
+   849→                  </div>
+   850→                  <Button ref={exportTriggerRef} variant="outline" onClick={handleOpenExport} aria-label="Export all data as JSON backup">
+   851→                    <Download aria-hidden="true" />
+   852→                    Export data
+   853→                  </Button>
+   854→                </div>
+   855→
+   856→                {/* Backup format versioning note (sits under the Export data button) */}
+   857→                <p className="-mt-2.5 flex items-start justify-end gap-1.5 px-1 text-xs text-muted-foreground">
+   858→                  <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+   859→                  <span>Backup format v2 — includes counts + favorites. v1 backups still import perfectly.</span>
+   860→                </p>
+   861→
+   862→                {/* Import backup (round-trip restore) */}
+   863→                <motion.div variants={fadeIn} className="rounded-lg border p-4" aria-labelledby="import-title">
+   864→                  <div className="flex items-center gap-3">
+   865→                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+   866→                      <Upload className="size-4" aria-hidden="true" />
+   867→                    </div>
+   868→                    <div>
+   869→                      <p id="import-title" className="text-sm font-medium">
+   870→                        Import backup
+   871→                      </p>
+   872→                      <p className="text-xs text-muted-foreground">
+   873→                        Restore a <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">resumeforge-backup.json</code> you exported
+   874→                        earlier.
+   875→                      </p>
+   876→                    </div>
+   877→                  </div>
+   878→
+   879→                  <Label htmlFor="import-backup-input" className="sr-only">
+   880→                    ResumeForge backup file (JSON)
+   881→                  </Label>
+   882→                  <input
+   883→                    ref={fileInputRef}
+   884→                    id="import-backup-input"
+   885→                    type="file"
+   886→                    accept="application/json,.json"
+   887→                    className="sr-only"
+   888→                    aria-label="ResumeForge backup file"
+   889→                    onChange={(e) => {
+   890→                      const file = e.target.files?.[0];
+   891→                      e.target.value = ""; // allow re-selecting the same file
+   892→                      if (file) void handleFileChosen(file);
+   893→                    }}
+   894→                  />
+   895→
+   896→                  <div
+   897→                    ref={dropzoneRef}
+   898→                    role="button"
+   899→                    tabIndex={0}
+   900→                    aria-label="Import backup: drop resumeforge-backup.json here, or press Enter to browse for the file"
+   901→                    aria-describedby="import-hint"
+   902→                    onClick={() => fileInputRef.current?.click()}
+   903→                    onKeyDown={(e) => {
+   904→                      if (e.key === "Enter" || e.key === " ") {
+   905→                        e.preventDefault();
+   906→                        fileInputRef.current?.click();
+   907→                      }
+   908→                    }}
+   909→                    onDragOver={(e) => {
+   910→                      e.preventDefault();
+   911→                      setDragOver(true);
+   912→                    }}
+   913→                    onDragLeave={(e) => {
+   914→                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+   915→                    }}
+   916→                    onDrop={(e) => {
+   917→                      e.preventDefault();
+   918→                      setDragOver(false);
+   919→                      const file = e.dataTransfer.files?.[0];
+   920→                      if (file) void handleFileChosen(file);
+   921→                    }}
+   922→                    className={cn(
+   923→                      "relative mt-4 flex cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-xl px-6 py-8 text-center transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+   924→                      dragOver
+   925→                        ? "bg-emerald-500/[0.08] text-emerald-600 dark:bg-emerald-400/[0.08] dark:text-emerald-400"
+   926→                        : "text-emerald-500/50 hover:bg-emerald-500/[0.03] hover:text-emerald-500/90 dark:text-emerald-400/40 dark:hover:text-emerald-400/70"
+   927→                    )}
+   928→                  >
+   929→                    {/* Animated dashed border (CSS stroke-dashoffset loop) */}
+   930→                    <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full">
+   931→                      <rect
+   932→                        x="1"
+   933→                        y="1"
+   934→                        rx="10"
+   935→                        style={{ width: "calc(100% - 2px)", height: "calc(100% - 2px)" }}
+   936→                        fill="none"
+   937→                        stroke="currentColor"
+   938→                        strokeWidth="2"
+   939→                        strokeDasharray="10 8"
+   940→                        className="dash-dance"
+   941→                      />
+   942→                    </svg>
+   943→                    <div
+   944→                      className={cn(
+   945→                        "flex size-11 items-center justify-center rounded-full transition-colors",
+   946→                        dragOver ? "bg-emerald-500/20 dark:bg-emerald-400/20" : "bg-emerald-500/10 dark:bg-emerald-400/10"
+   947→                      )}
+   948→                    >
+   949→                      <Upload className="size-5" aria-hidden="true" />
+   950→                    </div>
+   951→                    <p className="text-sm font-medium text-foreground">
+   952→                      Drop your <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">resumeforge-backup.json</code> here or{" "}
+   953→                      <span className="underline decoration-emerald-500/60 decoration-dashed underline-offset-4">browse</span>
+   954→                    </p>
+   955→                    <p id="import-hint" className="text-xs text-muted-foreground">
+   956→                      Restores resumes, applications, score history and counters. The file is read locally — nothing is uploaded.
+   957→                    </p>
+   958→                  </div>
+   959→                </motion.div>
+   960→
+   961→                <p className="text-xs text-muted-foreground">
+   962→                  Export produces <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">resumeforge-backup.json</code> — a full snapshot
+   963→                  of your resumes, settings and counters. Importing the same file restores it exactly.
+   964→                </p>
+   965→              </CardContent>
+   966→            </Card>
+   967→
+   968→            {/* Stored tool data — granular per-tool cleanup without touching the workspace */}
+   969→            <Card aria-labelledby="tool-data-title">
+   970→              <CardHeader>
+   971→                <CardTitle id="tool-data-title" className="text-base">
+   972→                  Stored tool data
+   973→                </CardTitle>
+   974→                <CardDescription>Granular cleanup — keep your resumes, clear the extras.</CardDescription>
+   975→              </CardHeader>
+   976→              <CardContent className="flex flex-col gap-3">
+   977→                <ToolDataRow
+   978→                  icon={History}
+   979→                  tintClass="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   980→                  name="Job Match history"
+   981→                  description="Recent analyses from the Job Match Scanner."
+   982→                  storageKey={MATCH_HISTORY_KEY}
+   983→                  count={toolDataCounts.matchHistory}
+   984→                  confirmTitle="Clear match history?"
+   985→                  confirmDescription="This removes all recent match analyses stored in this browser. Your resumes and ATS scores are not affected."
+   986→                  confirmLabel="Clear history"
+   987→                  onConfirm={handleClearMatchHistory}
+   988→                />
+   989→                <ToolDataRow
+   990→                  icon={CheckCheck}
+   991→                  tintClass="bg-zinc-500/10 text-zinc-600 dark:text-zinc-400"
+   992→                  name="Notification read-state"
+   993→                  description="Ids of notifications you already read."
+   994→                  storageKey={NOTIFS_READ_KEY}
+   995→                  count={toolDataCounts.readState}
+   996→                  confirmTitle="Reset read state?"
+   997→                  confirmDescription="Every notification will appear unread again the next time you open the bell."
+   998→                  confirmLabel="Reset read state"
+   999→                  onConfirm={handleClearReadState}
+  1000→                />
+  1001→                <ToolDataRow
+  1002→                  icon={SlidersHorizontal}
+  1003→                  tintClass="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+  1004→                  name="App preferences"
+  1005→                  description="Notification toggles that differ from the defaults."
+  1006→                  storageKey={NOTIFICATION_KEY}
+  1007→                  count={prefsCustomCount}
+  1008→                  confirmTitle="Reset preferences?"
+  1009→                  confirmDescription="Notification toggles return to their defaults: weekly digest and ATS reminders on, template alerts and product updates off."
+  1010→                  confirmLabel="Reset to defaults"
+  1011→                  onConfirm={handleClearPrefs}
+  1012→                />
+  1013→              </CardContent>
+  1014→            </Card>
+  1015→          </motion.section>
+  1016→
+  1017→          {/* ----------------------------- Danger zone ---------------------------- */}
+  1018→          <motion.section id="danger" variants={fadeUp} className="scroll-mt-24" aria-labelledby="danger-title">
+  1019→            <Card className="border-rose-500/40 bg-rose-500/[0.03] dark:border-rose-500/30">
+  1020→              <CardHeader>
+  1021→                <CardTitle id="danger-title" className="flex items-center gap-2 text-base text-rose-600 dark:text-rose-400">
+  1022→                  <ShieldAlert className="size-4" aria-hidden="true" />
+  1023→                  Danger zone
+  1024→                </CardTitle>
+  1025→                <CardDescription className="text-rose-600/80 dark:text-rose-400/80">
+  1026→                  Irreversible actions — please be certain.
+  1027→                </CardDescription>
+  1028→              </CardHeader>
+  1029→              <CardContent className="flex flex-wrap items-center justify-between gap-4">
+  1030→                <div>
+  1031→                  <p className="text-sm font-medium">Reset all data</p>
+  1032→                  <p className="text-xs text-muted-foreground">
+  1033→                    This restores the 3 sample resumes and clears your changes.
+  1034→                  </p>
+  1035→                </div>
+  1036→                <AlertDialog>
+  1037→                  <AlertDialogTrigger asChild>
+  1038→                    <Button
+  1039→                      variant="outline"
+  1040→                      className="border-rose-500/50 text-rose-600 hover:bg-rose-500/10 hover:text-rose-600 dark:text-rose-400 dark:hover:text-rose-300"
+  1041→                      aria-label="Reset all data"
+  1042→                    >
+  1043→                      <Trash2 aria-hidden="true" />
+  1044→                      Reset all data
+  1045→                    </Button>
+  1046→                  </AlertDialogTrigger>
+  1047→                  <AlertDialogContent>
+  1048→                    <AlertDialogHeader>
+  1049→                      <AlertDialogTitle>Reset all data?</AlertDialogTitle>
+  1050→                      <AlertDialogDescription>
+  1051→                        This restores the 3 sample resumes and clears your changes. This action cannot be undone.
+  1052→                      </AlertDialogDescription>
+  1053→                    </AlertDialogHeader>
+  1054→                    <AlertDialogFooter>
+  1055→                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1056→                      <AlertDialogAction
+  1057→                        onClick={handleResetAll}
+  1058→                        className="bg-rose-600 text-white hover:bg-rose-600/90 focus-visible:ring-rose-500/40"
+  1059→                      >
+  1060→                        Yes, reset everything
+  1061→                      </AlertDialogAction>
+  1062→                    </AlertDialogFooter>
+  1063→                  </AlertDialogContent>
+  1064→                </AlertDialog>
+  1065→              </CardContent>
+  1066→            </Card>
+  1067→          </motion.section>
+  1068→
+  1069→          {/* -------------------------------- About ------------------------------- */}
+  1070→          <motion.section id="about" variants={fadeUp} className="scroll-mt-24" aria-labelledby="about-title">
+  1071→            <Card>
+  1072→              <CardHeader>
+  1073→                <CardTitle id="about-title" className="text-base">
+  1074→                  About
+  1075→                </CardTitle>
+  1076→              </CardHeader>
+  1077→              <CardContent className="flex flex-col gap-4">
+  1078→                <div className="flex items-center gap-3">
+  1079→                  <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
+  1080→                    <Sparkles className="size-5" aria-hidden="true" />
+  1081→                  </div>
+  1082→                  <div>
+  1083→                    <p className="font-display flex items-center gap-2 text-sm font-semibold">
+  1084→                      ResumeForge AI
+  1085→                      <Badge variant="secondary" className="font-mono text-[10px]">
+  1086→                        v1.0.0
+  1087→                      </Badge>
+  1088→                    </p>
+  1089→                    <p className="text-xs text-muted-foreground">Frontend-only demo · your data never leaves this browser</p>
+  1090→                  </div>
+  1091→                </div>
+  1092→                <div className="flex flex-wrap gap-1.5" aria-label="Features">
+  1093→                  {[
+  1094→                    "6 resume templates",
+  1095→                    "AI bullet writer",
+  1096→                    "ATS scanner",
+  1097→                    "Grammar check",
+  1098→                    "Cover letters",
+  1099→                    "LinkedIn import",
+  1100→                    "Portfolio generator",
+  1101→                  ].map((feature) => (
+  1102→                    <span key={feature} className="rounded-full border bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground">
+  1103→                      {feature}
+  1104→                    </span>
+  1105→                  ))}
+  1106→                </div>
+  1107→                <p className="flex items-center gap-1.5 border-t pt-4 text-xs text-muted-foreground">
+  1108→                  Built with Next.js 16 · Tailwind 4 · shadcn/ui · framer-motion
+  1109→                  <Heart className="size-3.5 fill-rose-500 text-rose-500" aria-label="love" />
+  1110→                </p>
+  1111→              </CardContent>
+  1112→            </Card>
+  1113→          </motion.section>
+  1114→        </motion.div>
+  1115→      </div>
+  1116→
+  1117→      {/* ------------------------- Export confirmation ------------------------- */}
+  1118→      <Dialog open={exportSnapshot !== null} onOpenChange={(open) => { if (!open) setExportSnapshot(null); }}>
+  1119→        <DialogContent
+  1120→          className="sm:max-w-md"
+  1121→          onCloseAutoFocus={(e) => {
+  1122→            e.preventDefault();
+  1123→            exportTriggerRef.current?.focus();
+  1124→          }}
+  1125→        >
+  1126→          <DialogHeader>
+  1127→            <DialogTitle className="flex items-center gap-2">
+  1128→              <Download className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+  1129→              Export your workspace?
+  1130→            </DialogTitle>
+  1131→            <DialogDescription>
+  1132→              A full JSON snapshot of your workspace will download as resumeforge-backup.json.
+  1133→            </DialogDescription>
+  1134→          </DialogHeader>
+  1135→          {exportSnapshot ? (
+  1136→            <div className="flex flex-col gap-2" role="list" aria-label="Backup contents">
+  1137→              <div role="listitem">
+  1138→                <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2">
+  1139→                  <span className="text-muted-foreground">Backup format</span>
+  1140→                  <Badge variant="secondary" className="font-mono text-[10px]">
+  1141→                    v2
+  1142→                  </Badge>
+  1143→                </div>
+  1144→              </div>
+  1145→              <div role="listitem">
+  1146→                <SummaryRow
+  1147→                  label="Resumes"
+  1148→                  value={`${exportSnapshot.activeResumeCount} active · ${exportSnapshot.archivedResumeCount} archived`}
+  1149→                />
+  1150→              </div>
+  1151→              <div role="listitem">
+  1152→                <SummaryRow label="Cover letters" value={String(exportSnapshot.coverLetterCount)} />
+  1153→              </div>
+  1154→              <div role="listitem">
+  1155→                <SummaryRow label="Job applications" value={String(exportSnapshot.applicationCount)} />
+  1156→              </div>
+  1157→              <div role="listitem">
+  1158→                <SummaryRow label="Score history" value={`${exportSnapshot.scoreEntryCount} entries`} />
+  1159→              </div>
+  1160→              <div role="listitem">
+  1161→                <SummaryRow label="Interview favorites" value={String(exportSnapshot.favoritesCount)} />
+  1162→              </div>
+  1163→            </div>
+  1164→          ) : null}
+  1165→          <p className="flex items-start gap-2 text-xs text-muted-foreground">
+  1166→            <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+  1167→            <span>The file is generated in your browser — nothing is uploaded. Archived resumes are included in the snapshot.</span>
+  1168→          </p>
+  1169→          <DialogFooter className="gap-2 sm:gap-2">
+  1170→            <Button variant="outline" onClick={() => setExportSnapshot(null)}>
+  1171→              Cancel
+  1172→            </Button>
+  1173→            <Button
+  1174→              onClick={handleConfirmExport}
+  1175→              className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-500/90 hover:to-teal-600/90"
+  1176→            >
+  1177→              <Download aria-hidden="true" />
+  1178→              Download backup
+  1179→            </Button>
+  1180→          </DialogFooter>
+  1181→        </DialogContent>
+  1182→      </Dialog>
+  1183→
+  1184→      {/* ------------------------- Import confirmation ------------------------- */}
+  1185→      <Dialog open={pendingImport !== null} onOpenChange={(open) => { if (!open) setPendingImport(null); }}>
+  1186→        <DialogContent
+  1187→          className="sm:max-w-md"
+  1188→          onCloseAutoFocus={(e) => {
+  1189→            e.preventDefault();
+  1190→            dropzoneRef.current?.focus();
+  1191→          }}
+  1192→        >
+  1193→          <DialogHeader>
+  1194→            <DialogTitle className="flex items-center gap-2">
+  1195→              <Upload className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+  1196→              Restore this backup?
+  1197→            </DialogTitle>
+  1198→            <DialogDescription>Review the contents before they replace your current workspace.</DialogDescription>
+  1199→          </DialogHeader>
+  1200→          {pendingImport ? (
+  1201→            <div className="flex flex-col gap-2" role="list" aria-label="Backup contents">
+  1202→              <div role="listitem">
+  1203→                <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2">
+  1204→                  <span className="text-muted-foreground">Backup format</span>
+  1205→                  <Badge variant="secondary" className="font-mono text-[10px]">
+  1206→                    {pendingImport.formatVersion}
+  1207→                  </Badge>
+  1208→                </div>
+  1209→              </div>
+  1210→              <div role="listitem">
+  1211→                <SummaryRow
+  1212→                  label="Resumes"
+  1213→                  value={`${pendingImport.resumeCount - pendingImport.archivedResumeCount} active · ${pendingImport.archivedResumeCount} archived`}
+  1214→                />
+  1215→              </div>
+  1216→              <div role="listitem">
+  1217→                <SummaryRow
+  1218→                  label="Job applications"
+  1219→                  value={
+  1220→                    pendingImport.applicationCount !== null
+  1221→                      ? String(pendingImport.applicationCount)
+  1222→                      : "Resets to the 3 sample entries"
+  1223→                  }
+  1224→                />
+  1225→              </div>
+  1226→              <div role="listitem">
+  1227→                <SummaryRow
+  1228→                  label="Score history"
+  1229→                  value={
+  1230→                    pendingImport.scoreHistoryCount !== null
+  1231→                      ? `${pendingImport.scoreHistoryCount} entries`
+  1232→                      : "Resets to the 8 sample entries"
+  1233→                  }
+  1234→                />
+  1235→              </div>
+  1236→              {pendingImport.formatVersion === "v2" && pendingImport.interviewFavorites !== null ? (
+  1237→                <div role="listitem">
+  1238→                  <SummaryRow label="Interview favorites" value={String(pendingImport.interviewFavorites.length)} />
+  1239→                </div>
+  1240→              ) : null}
+  1241→              <div role="listitem">
+  1242→                <SummaryRow label="Exported" value={formatBackupDate(pendingImport.exportedAt)} />
+  1243→              </div>
+  1244→            </div>
+  1245→          ) : null}
+  1246→          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/[0.06] p-3 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-400/[0.06] dark:text-amber-400">
+  1247→            <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+  1248→            <span>
+  1249→              This replaces your current workspace — all resumes, applications and score history will be overwritten. Export a fresh
+  1250→              backup first if you might need it.
+  1251→            </span>
+  1252→          </div>
+  1253→          <DialogFooter className="gap-2 sm:gap-2">
+  1254→            <Button variant="outline" onClick={() => setPendingImport(null)}>
+  1255→              Cancel
+  1256→            </Button>
+  1257→            <Button
+  1258→              onClick={handleConfirmImport}
+  1259→              className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-500/90 hover:to-teal-600/90"
+  1260→            >
+  1261→              <Upload aria-hidden="true" />
+  1262→              Restore workspace
+  1263→            </Button>
+  1264→          </DialogFooter>
+  1265→        </DialogContent>
+  1266→      </Dialog>
+  1267→    </div>
+  1268→  );
+  1269→}
+  1270→

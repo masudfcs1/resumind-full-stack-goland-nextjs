@@ -1,0 +1,1011 @@
+     1→import {
+     2→  Building2,
+     3→  Code2,
+     4→  Compass,
+     5→  Crown,
+     6→  HeartHandshake,
+     7→  type LucideIcon,
+     8→} from "lucide-react";
+     9→import type { ResumeData } from "@/lib/resume-store";
+    10→
+    11→/* ============================== Types ============================== */
+    12→
+    13→export type QuestionCategory =
+    14→  | "behavioral"
+    15→  | "technical"
+    16→  | "situational"
+    17→  | "leadership"
+    18→  | "company";
+    19→
+    20→export type Difficulty = "easy" | "medium" | "hard";
+    21→export type DifficultyFilter = Difficulty | "all";
+    22→
+    23→/** STAR-structured model answer outline. */
+    24→export interface StarAnswer {
+    25→  situation: string;
+    26→  task: string;
+    27→  action: string;
+    28→  result: string;
+    29→}
+    30→
+    31→export interface Question {
+    32→  id: string;
+    33→  category: QuestionCategory;
+    34→  difficulty: Difficulty;
+    35→  /** May contain {company} / {skill} / {role} placeholders. */
+    36→  question: string;
+    37→  /** Optional resume-customized variant of the question text. */
+    38→  tailored?: (resume: ResumeData) => string | undefined;
+    39→  /** STAR framework — may contain the same placeholders. */
+    40→  star: StarAnswer;
+    41→  tips: string[];
+    42→}
+    43→
+    44→/** A question instantiated for a specific resume. */
+    45→export interface PracticeQuestion extends Question {
+    46→  /** Resolved question text (tailored variant when available). */
+    47→  text: string;
+    48→  isTailored: boolean;
+    49→  resolvedStar: StarAnswer;
+    50→}
+    51→
+    52→export interface GenerateOptions {
+    53→  categories: QuestionCategory[];
+    54→  difficulty: DifficultyFilter;
+    55→  count?: number;
+    56→}
+    57→
+    58→/* ============================== Category / difficulty meta ============================== */
+    59→
+    60→export const CATEGORY_ORDER: QuestionCategory[] = [
+    61→  "behavioral",
+    62→  "technical",
+    63→  "situational",
+    64→  "leadership",
+    65→  "company",
+    66→];
+    67→
+    68→export const CATEGORY_META: Record<
+    69→  QuestionCategory,
+    70→  { label: string; icon: LucideIcon; tint: string }
+    71→> = {
+    72→  behavioral: {
+    73→    label: "Behavioral",
+    74→    icon: HeartHandshake,
+    75→    tint: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    76→  },
+    77→  technical: {
+    78→    label: "Technical",
+    79→    icon: Code2,
+    80→    tint: "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300",
+    81→  },
+    82→  situational: {
+    83→    label: "Situational",
+    84→    icon: Compass,
+    85→    tint: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    86→  },
+    87→  leadership: {
+    88→    label: "Leadership",
+    89→    icon: Crown,
+    90→    tint: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+    91→  },
+    92→  company: {
+    93→    label: "Company / Culture",
+    94→    icon: Building2,
+    95→    tint: "border-teal-500/30 bg-teal-500/10 text-teal-700 dark:text-teal-300",
+    96→  },
+    97→};
+    98→
+    99→export const DIFFICULTY_META: Record<
+   100→  Difficulty,
+   101→  { label: string; level: 1 | 2 | 3; dot: string }
+   102→> = {
+   103→  easy: { label: "Easy", level: 1, dot: "bg-emerald-500" },
+   104→  medium: { label: "Medium", level: 2, dot: "bg-amber-500" },
+   105→  hard: { label: "Hard", level: 3, dot: "bg-rose-500" },
+   106→};
+   107→
+   108→/* ============================== Placeholder resolution ============================== */
+   109→
+   110→/** Replaces {company} / {skill} / {role} with data from the active resume. */
+   111→export function resolvePlaceholders(text: string, resume: ResumeData): string {
+   112→  const company = resume.experience[0]?.company || "your current company";
+   113→  const skill = resume.skills[0]?.name || "your core skill";
+   114→  const role = resume.personal.jobTitle || resume.title || "this role";
+   115→  return text
+   116→    .replace(/\{company\}/g, company)
+   117→    .replace(/\{skill\}/g, skill)
+   118→    .replace(/\{role\}/g, role);
+   119→}
+   120→
+   121→function resolveStar(star: StarAnswer, resume: ResumeData): StarAnswer {
+   122→  return {
+   123→    situation: resolvePlaceholders(star.situation, resume),
+   124→    task: resolvePlaceholders(star.task, resume),
+   125→    action: resolvePlaceholders(star.action, resume),
+   126→    result: resolvePlaceholders(star.result, resume),
+   127→  };
+   128→}
+   129→
+   130→/* ============================== Question bank (45) ============================== */
+   131→
+   132→export const QUESTION_BANK: Question[] = [
+   133→  /* ---------------- Behavioral (10) ---------------- */
+   134→  {
+   135→    id: "b1",
+   136→    category: "behavioral",
+   137→    difficulty: "easy",
+   138→    question: "Tell me about yourself.",
+   139→    star: {
+   140→      situation: "Open with one line: who you are now — a {role} focused on {skill}.",
+   141→      task: "Set up the arc of your career in a single sentence.",
+   142→      action: "Walk through 2–3 career highlights in order, each with a number attached.",
+   143→      result: "Land on why this role is the natural next step for you.",
+   144→    },
+   145→    tips: [
+   146→      "Keep it under 90 seconds — rehearse it out loud",
+   147→      "This is not your life story; it is your highlight reel",
+   148→      "End pointing at the job you are interviewing for",
+   149→    ],
+   150→  },
+   151→  {
+   152→    id: "b2",
+   153→    category: "behavioral",
+   154→    difficulty: "medium",
+   155→    question: "Tell me about a time you led a project.",
+   156→    tailored: (resume) => {
+   157→      const company = resume.experience[0]?.company;
+   158→      return company ? `Tell me about a time you led a project at ${company}.` : undefined;
+   159→    },
+   160→    star: {
+   161→      situation: "Name the project at {company}: stakes, timeline, and team size.",
+   162→      task: "Your exact mandate — what leading meant: decisions, scope, people.",
+   163→      action: "How you aligned stakeholders and used {skill} to keep the team unblocked.",
+   164→      result: "Ship the outcome with a metric, plus one lesson about leading.",
+   165→    },
+   166→    tips: [
+   167→      "Say \u201cI led\u201d, not \u201cwe led\u201d — own your contribution",
+   168→      "Pick a story with a measurable ending",
+   169→      "Mention one thing you would do differently",
+   170→    ],
+   171→  },
+   172→  {
+   173→    id: "b3",
+   174→    category: "behavioral",
+   175→    difficulty: "medium",
+   176→    question: "Describe a conflict with a coworker and how you resolved it.",
+   177→    star: {
+   178→      situation: "The disagreement: roles involved, what was at stake, why it got tense.",
+   179→      task: "Your goal: solve the problem without damaging the relationship.",
+   180→      action: "You listened first, found shared ground, and proposed a concrete compromise.",
+   181→      result: "The project outcome — with a number — plus a stronger working relationship.",
+   182→    },
+   183→    tips: [
+   184→      "Never bad-mouth the other person — stay factual",
+   185→      "Show empathy for their position before your reasoning",
+   186→      "Avoid any story where HR had to intervene",
+   187→    ],
+   188→  },
+   189→  {
+   190→    id: "b4",
+   191→    category: "behavioral",
+   192→    difficulty: "medium",
+   193→    question: "Tell me about your biggest professional failure.",
+   194→    star: {
+   195→      situation: "A real failure you own — at {company} or before. Not a humble-brag.",
+   196→      task: "What was riding on it and why it went sideways.",
+   197→      action: "How you surfaced it, contained the damage, and communicated early.",
+   198→      result: "The fix, the cost, and the guardrail you added so it never repeats.",
+   199→    },
+   200→    tips: [
+   201→      "Pick a real failure — interviewers smell fake ones",
+   202→      "Spend most of the answer on what you changed afterwards",
+   203→      "End on the system or habit you built from it",
+   204→    ],
+   205→  },
+   206→  {
+   207→    id: "b5",
+   208→    category: "behavioral",
+   209→    difficulty: "easy",
+   210→    question: "Why are you leaving your current job?",
+   211→    star: {
+   212→      situation: "One neutral sentence about your current {role} position.",
+   213→      task: "Name the gap between what you do now and what you want next.",
+   214→      action: "What you are moving toward: growth, scope, this company's mission.",
+   215→      result: "Frame it as running toward something, never running away.",
+   216→    },
+   217→    tips: [
+   218→      "Never criticize your current employer or manager",
+   219→      "Anchor the answer to something this new role offers",
+   220→      "Keep it to 30 seconds — this is a landmine question",
+   221→    ],
+   222→  },
+   223→  {
+   224→    id: "b6",
+   225→    category: "behavioral",
+   226→    difficulty: "medium",
+   227→    question: "Describe a time you received harsh feedback.",
+   228→    star: {
+   229→      situation: "The feedback moment: who gave it and how it landed on you.",
+   230→      task: "Separating your ego from the signal inside the message.",
+   231→      action: "What you asked to clarify it, and the specific change you made.",
+   232→      result: "The measurable improvement and how the relationship evolved after.",
+   233→    },
+   234→    tips: [
+   235→      "Show you asked questions instead of defending",
+   236→      "Name the concrete behavior change it triggered",
+   237→      "Never say the feedback was unfair",
+   238→    ],
+   239→  },
+   240→  {
+   241→    id: "b7",
+   242→    category: "behavioral",
+   243→    difficulty: "hard",
+   244→    question: "Tell me about a time you had to deliver bad news to stakeholders.",
+   245→    star: {
+   246→      situation: "The bad news at {company}: slipped launch, missed target, or cut scope.",
+   247→      task: "Get leadership the truth fast, without panic or spin.",
+   248→      action: "You prepared options, led with the headline, and owned the cause.",
+   249→      result: "The adjusted plan, what it preserved, and trust that survived intact.",
+   250→    },
+   251→    tips: [
+   252→      "Deliver the headline in the first sentence",
+   253→      "Always bring 2–3 options, not just the problem",
+   254→      "Follow up in writing so nobody hears it secondhand",
+   255→    ],
+   256→  },
+   257→  {
+   258→    id: "b8",
+   259→    category: "behavioral",
+   260→    difficulty: "easy",
+   261→    question: "What is your greatest strength?",
+   262→    tailored: (resume) => {
+   263→      const skill = resume.skills[0]?.name;
+   264→      return skill ? `How has ${skill} become your greatest strength in practice?` : undefined;
+   265→    },
+   266→    star: {
+   267→      situation: "Name one strength — {skill} — and where you use it daily.",
+   268→      task: "Why that strength matters for this {role} position.",
+   269→      action: "A quick proof story with a metric from {company}.",
+   270→      result: "How you would apply it to this team's problems in week one.",
+   271→    },
+   272→    tips: [
+   273→      "One strength, one story — not a list of adjectives",
+   274→      "Tie it directly to the job description",
+   275→      "Prove it with a number, not an opinion",
+   276→    ],
+   277→  },
+   278→  {
+   279→    id: "b9",
+   280→    category: "behavioral",
+   281→    difficulty: "easy",
+   282→    question: "What is your greatest weakness?",
+   283→    star: {
+   284→      situation: "A real, non-fatal weakness — honest and specific.",
+   285→      task: "Why it matters in your line of work.",
+   286→      action: "The concrete system you built to manage it.",
+   287→      result: "Evidence it is handled: a recent example where the system worked.",
+   288→    },
+   289→    tips: [
+   290→      "\u201cPerfectionism\u201d is a cliché — pick something real",
+   291→      "Show an active management system, not a promise",
+   292→      "Pick a weakness that is not core to this role",
+   293→    ],
+   294→  },
+   295→  {
+   296→    id: "b10",
+   297→    category: "behavioral",
+   298→    difficulty: "hard",
+   299→    question: "Tell me about a time you juggled multiple high-priority deadlines.",
+   300→    star: {
+   301→      situation: "The pile-up at {company}: competing projects with real stakes.",
+   302→      task: "Deciding what moved, what waited, and who needed to know.",
+   303→      action: "How you triaged by impact, renegotiated scope openly, and tracked it all.",
+   304→      result: "Everything landed or was consciously re-prioritized — give the numbers.",
+   305→    },
+   306→    tips: [
+   307→      "Show a triage framework, not heroics",
+   308→      "Renegotiating early beats missing silently",
+   309→      "Name the tool or system you used to track it all",
+   310→    ],
+   311→  },
+   312→
+   313→  /* ---------------- Technical (10) ---------------- */
+   314→  {
+   315→    id: "t1",
+   316→    category: "technical",
+   317→    difficulty: "medium",
+   318→    question: "Walk me through how you make technical decisions.",
+   319→    tailored: (resume) => {
+   320→      const company = resume.experience[0]?.company;
+   321→      return company
+   322→        ? `Walk me through a major technical decision you made at ${company}.`
+   323→        : undefined;
+   324→    },
+   325→    star: {
+   326→      situation: "A real fork in the road at {company}: two viable options.",
+   327→      task: "The constraints — deadline, team skills, maintenance cost.",
+   328→      action: "Your evaluation process: criteria, spikes, and who you consulted.",
+   329→      result: "The choice, the outcome with numbers, and what you would revisit.",
+   330→    },
+   331→    tips: [
+   332→      "Show a repeatable framework, not a one-off story",
+   333→      "Name the trade-offs you accepted explicitly",
+   334→      "Mention where you sought a second opinion",
+   335→    ],
+   336→  },
+   337→  {
+   338→    id: "t2",
+   339→    category: "technical",
+   340→    difficulty: "easy",
+   341→    question: "What does your daily toolchain look like, and why?",
+   342→    tailored: (resume) => {
+   343→      const top = resume.skills
+   344→        .slice(0, 3)
+   345→        .map((s) => s.name)
+   346→        .filter(Boolean);
+   347→      return top.length >= 2 ? `Why have you bet on ${top.join(", ")}?` : undefined;
+   348→    },
+   349→    star: {
+   350→      situation: "Your daily stack, led by {skill}.",
+   351→      task: "The problems you solve with it at {company}.",
+   352→      action: "Why each tool earns its place: speed, ecosystem, team familiarity.",
+   353→      result: "A concrete win the stack enabled — faster delivery or fewer bugs.",
+   354→    },
+   355→    tips: [
+   356→      "Tie every tool to a problem it solves",
+   357→      "Admit one limitation you work around",
+   358→      "Show curiosity about alternatives",
+   359→    ],
+   360→  },
+   361→  {
+   362→    id: "t3",
+   363→    category: "technical",
+   364→    difficulty: "medium",
+   365→    question: "How do you ensure quality in your work?",
+   366→    star: {
+   367→      situation: "The quality bar your current team holds work to.",
+   368→      task: "What done well means for {skill} work: correctness, readability, performance.",
+   369→      action: "Your layers: tests, reviews, linting, staging checks, self-review habits.",
+   370→      result: "A bug-catching or regression story with a number attached.",
+   371→    },
+   372→    tips: [
+   373→      "Talk process, not perfection",
+   374→      "Include code review — giving and receiving",
+   375→      "One story where a quality check caught something big",
+   376→    ],
+   377→  },
+   378→  {
+   379→    id: "t4",
+   380→    category: "technical",
+   381→    difficulty: "hard",
+   382→    question: "Describe the most complex technical problem you have ever solved.",
+   383→    star: {
+   384→      situation: "The problem at {company}: why it was hard — unknowns, scale, ambiguity.",
+   385→      task: "What success looked like and the deadline pressure around it.",
+   386→      action: "How you broke it down: hypotheses, experiments, the breakthrough with {skill}.",
+   387→      result: "The measurable fix and its ripple effects: performance, cost, reliability.",
+   388→    },
+   389→    tips: [
+   390→      "Spend 20% on the problem, 80% on your method",
+   391→      "Explaining complexity simply IS the test",
+   392→      "Quantify the impact in your last sentence",
+   393→    ],
+   394→  },
+   395→  {
+   396→    id: "t5",
+   397→    category: "technical",
+   398→    difficulty: "medium",
+   399→    question: "How do you stay current in your field?",
+   400→    star: {
+   401→      situation: "Your field moves fast — say so honestly.",
+   402→      task: "What you optimize for: depth in {skill} vs. breadth of trends.",
+   403→      action: "Your system: sources, side projects, communities, teaching others.",
+   404→      result: "One recent technique you shipped into production.",
+   405→    },
+   406→    tips: [
+   407→      "Name specific sources, not \u201cI read a lot\u201d",
+   408→      "Side projects make this credible",
+   409→      "Teaching or writing about it is the strongest proof",
+   410→    ],
+   411→  },
+   412→  {
+   413→    id: "t6",
+   414→    category: "technical",
+   415→    difficulty: "hard",
+   416→    question: "How would you explain a complex technical concept to a non-technical stakeholder?",
+   417→    star: {
+   418→      situation: "A real moment: leadership needed to understand {skill} trade-offs.",
+   419→      task: "The decision they had to make based on your explanation.",
+   420→      action: "Your translation: one analogy, the cost of doing nothing, a clear visual.",
+   421→      result: "They decided quickly and correctly — describe what happened next.",
+   422→    },
+   423→    tips: [
+   424→      "Lead with the business impact, not the tech",
+   425→      "One analogy, used consistently — never condescending",
+   426→      "Check understanding with a question at the end",
+   427→    ],
+   428→  },
+   429→  {
+   430→    id: "t7",
+   431→    category: "technical",
+   432→    difficulty: "medium",
+   433→    question: "Tell me about a time you made something dramatically faster or cheaper.",
+   434→    tailored: (resume) => {
+   435→      const company = resume.experience[0]?.company;
+   436→      return company
+   437→        ? `Tell me about a time you made something at ${company} dramatically faster or cheaper.`
+   438→        : undefined;
+   439→    },
+   440→    star: {
+   441→      situation: "The slow or expensive thing: what it cost in time or dollars.",
+   442→      task: "The target and the constraint — no behavior changes allowed.",
+   443→      action: "How you profiled, found the bottleneck, and fixed it with {skill}.",
+   444→      result: "The before/after numbers: latency, cost, or hours saved.",
+   445→    },
+   446→    tips: [
+   447→      "Before/after numbers are the whole story",
+   448→      "Show how you measured, not guessed",
+   449→      "Mention what you refused to sacrifice",
+   450→    ],
+   451→  },
+   452→  {
+   453→    id: "t8",
+   454→    category: "technical",
+   455→    difficulty: "hard",
+   456→    question: "Walk me through something you designed and own end to end.",
+   457→    star: {
+   458→      situation: "The system or process: its users, scale, and why you owned it.",
+   459→      task: "The requirements and the ugliest constraint.",
+   460→      action: "Your architecture and iteration: v1 mistakes, v2 fixes, feedback loops.",
+   461→      result: "Where it stands today: adoption, reliability, or revenue numbers.",
+   462→    },
+   463→    tips: [
+   464→      "Own the failures inside it — that is credibility",
+   465→      "Describe it as components first, then connections",
+   466→      "End on how it evolves without you",
+   467→    ],
+   468→  },
+   469→  {
+   470→    id: "t9",
+   471→    category: "technical",
+   472→    difficulty: "easy",
+   473→    question: "What project are you most proud of?",
+   474→    tailored: (resume) => {
+   475→      const project = resume.projects[0]?.name;
+   476→      return project ? `Tell me about ${project} — what made it a success?` : undefined;
+   477→    },
+   478→    star: {
+   479→      situation: "The project and the problem it solved for real users.",
+   480→      task: "Your specific role and the hardest part.",
+   481→      action: "The decisions and craft that made the difference — show {skill} at work.",
+   482→      result: "The outcome: users, stars, revenue, or praise — whatever proves it mattered.",
+   483→    },
+   484→    tips: [
+   485→      "Pick something recent and yours, not a team credit",
+   486→      "Genuine enthusiasm is contagious — show it",
+   487→      "Have the demo or link ready to show",
+   488→    ],
+   489→  },
+   490→  {
+   491→    id: "t10",
+   492→    category: "technical",
+   493→    difficulty: "medium",
+   494→    question: "How do you debug something you have never seen before?",
+   495→    star: {
+   496→      situation: "A real example: unfamiliar system, production pressure.",
+   497→      task: "Narrowing an unknown-unknowns problem to a root cause.",
+   498→      action: "Your method: reproduce, isolate, bisect, question assumptions — plus {skill} tricks.",
+   499→      result: "The fix, the time to resolution, and the doc or test you left behind.",
+   500→    },
+   501→    tips: [
+   502→      "Show a systematic method, not trial and error",
+   503→      "Asking for help is a strength — say when you escalate",
+   504→      "Say what you wrote down so it never repeats",
+   505→    ],
+   506→  },
+   507→
+   508→  /* ---------------- Situational (9) ---------------- */
+   509→  {
+   510→    id: "s1",
+   511→    category: "situational",
+   512→    difficulty: "medium",
+   513→    question: "What would you do in your first 30 days here?",
+   514→    star: {
+   515→      situation: "You are the new person — say that context out loud.",
+   516→      task: "Earn trust while learning: people, product, and process.",
+   517→      action: "Week 1: meet the team and ship something small. Weeks 2–4: map systems, find one quick win with {skill}.",
+   518→      result: "A 30-day read on where you can create the most value.",
+   519→    },
+   520→    tips: [
+   521→      "Ship something small early — it changes everything",
+   522→      "Ask more than you assert in week one",
+   523→      "Find their existing rhythm before proposing changes",
+   524→    ],
+   525→  },
+   526→  {
+   527→    id: "s2",
+   528→    category: "situational",
+   529→    difficulty: "hard",
+   530→    question: "You inherit a project that is already behind schedule. What are your first steps?",
+   531→    star: {
+   532→      situation: "The inherited project: a slipping date and murky status.",
+   533→      task: "Get an honest picture fast without assigning blame.",
+   534→      action: "Audit the plan, find the critical path, cut scope with stakeholders, re-baseline.",
+   535→      result: "A new credible date and a recovering team — name the trade-offs made.",
+   536→    },
+   537→    tips: [
+   538→      "Diagnose before touching anything",
+   539→      "Renegotiate scope first, hours second",
+   540→      "Communicate the new plan in writing to everyone",
+   541→    ],
+   542→  },
+   543→  {
+   544→    id: "s3",
+   545→    category: "situational",
+   546→    difficulty: "medium",
+   547→    question: "A teammate disagrees with your approach — in a public channel. What do you do?",
+   548→    star: {
+   549→      situation: "The public disagreement: what was challenged and who was watching.",
+   550→      task: "Resolve the technical question and protect the relationship.",
+   551→      action: "Acknowledge the point, move the debate to a call, weigh both options on merit.",
+   552→      result: "The better option won on evidence — and the teammate became an ally.",
+   553→    },
+   554→    tips: [
+   555→      "Never fight in public threads — de-escalate to private",
+   556→      "Attack the problem, never the person",
+   557→      "Be genuinely open to them being right",
+   558→    ],
+   559→  },
+   560→  {
+   561→    id: "s4",
+   562→    category: "situational",
+   563→    difficulty: "easy",
+   564→    question: "You have time for one of two urgent tasks. How do you decide?",
+   565→    star: {
+   566→      situation: "Two urgent tasks, one of you.",
+   567→      task: "Work out which one actually moves the needle for the team.",
+   568→      action: "Rank by impact and reversibility, then confirm with your manager in one message.",
+   569→      result: "A deliberate choice — and the other task re-planned, not dropped.",
+   570→    },
+   571→    tips: [
+   572→      "Impact first, effort second",
+   573→      "A one-line heads-up to stakeholders prevents surprises",
+   574→      "\u201cUrgent\u201d is not the same as \u201cimportant\u201d",
+   575→    ],
+   576→  },
+   577→  {
+   578→    id: "s5",
+   579→    category: "situational",
+   580→    difficulty: "medium",
+   581→    question: "How would you handle a stakeholder who keeps changing requirements?",
+   582→    star: {
+   583→      situation: "The shifting stakeholder: why the changes keep coming.",
+   584→      task: "Protect the timeline while keeping them engaged.",
+   585→      action: "Create a change process: written requests, cost trade-offs, a decision checkpoint.",
+   586→      result: "Fewer surprises, a shipped product, and a stakeholder who feels heard.",
+   587→    },
+   588→    tips: [
+   589→      "Show the cost of each change, in writing",
+   590→      "Never a flat no — offer options instead",
+   591→      "Understand the why behind the churn first",
+   592→    ],
+   593→  },
+   594→  {
+   595→    id: "s6",
+   596→    category: "situational",
+   597→    difficulty: "hard",
+   598→    question: "You spot a serious mistake in shipped work that nobody else noticed. What now?",
+   599→    star: {
+   600→      situation: "The discovered mistake: user impact and blast radius.",
+   601→      task: "Fix it fast and honestly, without triggering panic.",
+   602→      action: "Assess severity, notify the owner immediately, propose the fix, help ship it.",
+   603→      result: "Fixed before users noticed — plus a process tweak so it stays fixed.",
+   604→    },
+   605→    tips: [
+   606→      "Speed of disclosure beats perfection of diagnosis",
+   607→      "Bring a proposed fix, not just the alarm",
+   608→      "Blameless postmortems keep teams honest",
+   609→    ],
+   610→  },
+   611→  {
+   612→    id: "s7",
+   613→    category: "situational",
+   614→    difficulty: "medium",
+   615→    question: "Your manager asks you to take on work outside your role. How do you respond?",
+   616→    star: {
+   617→      situation: "The out-of-scope request and your current load.",
+   618→      task: "Be a team player without derailing your commitments.",
+   619→      action: "Say yes to learning if feasible, lay out trade-offs, agree priorities explicitly.",
+   620→      result: "Both goals met — or one consciously deferred with your manager aligned.",
+   621→    },
+   622→    tips: [
+   623→      "Never a flat no — make it \u201cyes, and here is what moves\u201d",
+   624→      "Frame stretch work as growth, if it genuinely is",
+   625→      "Get the re-prioritization in writing",
+   626→    ],
+   627→  },
+   628→  {
+   629→    id: "s8",
+   630→    category: "situational",
+   631→    difficulty: "easy",
+   632→    question: "How do you prioritize when everything feels urgent?",
+   633→    star: {
+   634→      situation: "The crunch moment: many tasks, all flagged urgent.",
+   635→      task: "Find the real order underneath the noise.",
+   636→      action: "Your method: impact vs. effort, deadlines, dependencies — then communicate the order.",
+   637→      result: "The important things shipped; the noise handled or declined with reasons.",
+   638→    },
+   639→    tips: [
+   640→      "Write the list down — brains are bad at ranking",
+   641→      "Ask \u201curgent for whom?\u201d — the answer reorders everything",
+   642→      "Communicate the ranking so nobody is surprised",
+   643→    ],
+   644→  },
+   645→  {
+   646→    id: "s9",
+   647→    category: "situational",
+   648→    difficulty: "hard",
+   649→    question: "First week in, you find a process that seems broken. Do you speak up?",
+   650→    star: {
+   651→      situation: "The broken process and why nobody has fixed it yet.",
+   652→      task: "Earn the right to suggest change without stepping on toes.",
+   653→      action: "Learn the history first, then propose a small experiment backed with data.",
+   654→      result: "Improved with buy-in — or you learned the constraint you were missing.",
+   655→    },
+   656→    tips: [
+   657→      "Understand why it exists before criticizing it",
+   658→      "Propose experiments, not verdicts",
+   659→      "Find the process owner and make them the hero",
+   660→    ],
+   661→  },
+   662→
+   663→  /* ---------------- Leadership (8) ---------------- */
+   664→  {
+   665→    id: "l1",
+   666→    category: "leadership",
+   667→    difficulty: "medium",
+   668→    question: "Tell me about a time you mentored someone.",
+   669→    tailored: (resume) => {
+   670→      const company = resume.experience[0]?.company;
+   671→      return company ? `Tell me about someone you mentored at ${company}.` : undefined;
+   672→    },
+   673→    star: {
+   674→      situation: "The mentee: where they started and what they struggled with at {company}.",
+   675→      task: "What they actually needed — skill, confidence, or direction.",
+   676→      action: "Your cadence: pairing, feedback loops, progressively bigger ownership.",
+   677→      result: "The concrete outcome — promotion, shipped project, new skill — with a number.",
+   678→    },
+   679→    tips: [
+   680→      "Focus on their growth, not your teaching",
+   681→      "Name the moment they no longer needed you",
+   682→      "Numbers: promotions, retention, or delivery wins",
+   683→    ],
+   684→  },
+   685→  {
+   686→    id: "l2",
+   687→    category: "leadership",
+   688→    difficulty: "hard",
+   689→    question: "Tell me about influencing a decision when you had no formal authority.",
+   690→    star: {
+   691→      situation: "The decision that was not yours to make — and why it mattered.",
+   692→      task: "Win over people with different incentives than yours.",
+   693→      action: "You built the case with data, recruited allies one-on-one, let the owner decide.",
+   694→      result: "The decision went your way — the outcome and the trust it built.",
+   695→    },
+   696→    tips: [
+   697→      "Influence is earned one conversation at a time",
+   698→      "Frame ideas in the other person's incentives",
+   699→      "Let the decision owner keep the credit",
+   700→    ],
+   701→  },
+   702→  {
+   703→    id: "l3",
+   704→    category: "leadership",
+   705→    difficulty: "medium",
+   706→    question: "How do you delegate?",
+   707→    star: {
+   708→      situation: "Work you own that you cannot do alone.",
+   709→      task: "Match tasks to people's growth edges, not just availability.",
+   710→      action: "Your method: clear outcome, context, authority level, a check-in plan.",
+   711→      result: "Delivered work plus a person who grew — name a real example.",
+   712→    },
+   713→    tips: [
+   714→      "Delegate the outcome, not the task steps",
+   715→      "Delegation is development, not just offloading",
+   716→      "Say what you do NOT delegate and why",
+   717→    ],
+   718→  },
+   719→  {
+   720→    id: "l4",
+   721→    category: "leadership",
+   722→    difficulty: "hard",
+   723→    question: "Tell me about a time you made an unpopular decision.",
+   724→    star: {
+   725→      situation: "The decision at {company} and why it was necessary.",
+   726→      task: "The resistance: who disagreed and what it cost you socially.",
+   727→      action: "How you explained the reasoning, listened genuinely, and held the line.",
+   728→      result: "Vindicated by results — or adjusted with humility. Either is a good answer.",
+   729→    },
+   730→    tips: [
+   731→      "Disagree with the decision, never the people",
+   732→      "Show you genuinely considered the opposition",
+   733→      "Own the social cost — that is leadership",
+   734→    ],
+   735→  },
+   736→  {
+   737→    id: "l5",
+   738→    category: "leadership",
+   739→    difficulty: "easy",
+   740→    question: "How do you keep a team motivated during a crunch?",
+   741→    star: {
+   742→      situation: "The crunch: deadline pressure and visibly tired people.",
+   743→      task: "Sustain output without burning humans.",
+   744→      action: "Shield the team, celebrate small wins, work alongside them, cut scope openly.",
+   745→      result: "The delivered milestone plus a team intact — retention or follow-on results.",
+   746→    },
+   747→    tips: [
+   748→      "Protect the team from churn above you",
+   749→      "Small public wins beat big promises",
+   750→      "People remember how you acted at 11pm",
+   751→    ],
+   752→  },
+   753→  {
+   754→    id: "l6",
+   755→    category: "leadership",
+   756→    difficulty: "medium",
+   757→    question: "Tell me about helping a struggling teammate.",
+   758→    star: {
+   759→      situation: "The teammate: the signs of struggle, not your assumptions about causes.",
+   760→      task: "Help without taking over their work.",
+   761→      action: "You created safety, asked what they needed, paired on the hardest parts.",
+   762→      result: "Their recovery: delivered work, confidence back, maybe a saved role.",
+   763→    },
+   764→    tips: [
+   765→      "Ask before advising — diagnose together",
+   766→      "Privacy matters: no public rescues",
+   767→      "Struggles are usually context, not character",
+   768→    ],
+   769→  },
+   770→  {
+   771→    id: "l7",
+   772→    category: "leadership",
+   773→    difficulty: "hard",
+   774→    question: "You join a team with low trust. How do you build trust fast?",
+   775→    star: {
+   776→      situation: "The low-trust situation: what caused it, how it shows up day to day.",
+   777→      task: "Rebuild credibility as a newcomer without overstepping.",
+   778→      action: "Listen first, fix one visible pain point, make your own commitments trackable.",
+   779→      result: "Trust returning: honest debates, improved delivery, people staying.",
+   780→    },
+   781→    tips: [
+   782→      "Trust is built by kept micro-promises",
+   783→      "Do the unglamorous work visibly",
+   784→      "Never talk about trust — demonstrate it",
+   785→    ],
+   786→  },
+   787→  {
+   788→    id: "l8",
+   789→    category: "leadership",
+   790→    difficulty: "medium",
+   791→    question: "What does great leadership look like to you?",
+   792→    star: {
+   793→      situation: "Ground it in a leader you actually worked with.",
+   794→      task: "What their impact was on you and the team.",
+   795→      action: "Extract the behaviors: clarity, shielding, high standards, genuine care.",
+   796→      result: "How you practice those behaviors today with your team and your {skill} work.",
+   797→    },
+   798→    tips: [
+   799→      "Show a philosophy, not a motivational poster",
+   800→      "One concrete story beats five abstractions",
+   801→      "Tie it to how you would lead this team",
+   802→    ],
+   803→  },
+   804→
+   805→  /* ---------------- Company / Culture (8) ---------------- */
+   806→  {
+   807→    id: "c1",
+   808→    category: "company",
+   809→    difficulty: "easy",
+   810→    question: "Why do you want to work here?",
+   811→    star: {
+   812→      situation: "What drew you: the product, the mission, or a problem you have lived.",
+   813→      task: "The match between your {skill} strengths and their needs.",
+   814→      action: "Research: name a product detail, launch, or value that resonates with you.",
+   815→      result: "Close with the specific contribution you want to make in the {role} seat.",
+   816→    },
+   817→    tips: [
+   818→      "Name something specific — no generic praise",
+   819→      "Connect their roadmap to your experience",
+   820→      "Enthusiasm is a strategy, not a weakness",
+   821→    ],
+   822→  },
+   823→  {
+   824→    id: "c2",
+   825→    category: "company",
+   826→    difficulty: "medium",
+   827→    question: "What do you know about our company so far?",
+   828→    star: {
+   829→      situation: "Open with their one-liner: what they do and for whom.",
+   830→      task: "Layer in what you found: recent launches, growth, culture signals.",
+   831→      action: "Show how you researched — product used, docs read, people followed.",
+   832→      result: "End with a smart question — research earns the right to ask.",
+   833→    },
+   834→    tips: [
+   835→      "Use their product the week before",
+   836→      "Mention something recent — a launch or milestone",
+   837→      "One thoughtful question beats ten facts",
+   838→    ],
+   839→  },
+   840→  {
+   841→    id: "c3",
+   842→    category: "company",
+   843→    difficulty: "easy",
+   844→    question: "What kind of culture helps you do your best work?",
+   845→    star: {
+   846→      situation: "Your best-work conditions: autonomy, feedback, pace.",
+   847→      task: "Why those conditions matter for {skill} work.",
+   848→      action: "Evidence: a team where you thrived and what it had in common with this one.",
+   849→      result: "Invite the fit check — ask how their team would describe itself.",
+   850→    },
+   851→    tips: [
+   852→      "Describe conditions, not demands",
+   853→      "Show you adapt to different cultures",
+   854→      "Turn it into a two-way conversation",
+   855→    ],
+   856→  },
+   857→  {
+   858→    id: "c4",
+   859→    category: "company",
+   860→    difficulty: "medium",
+   861→    question: "How do you prefer to receive feedback?",
+   862→    star: {
+   863→      situation: "Your honest preference: direct, specific, written or verbal.",
+   864→      task: "Why that format helps you act faster.",
+   865→      action: "How you adapted to managers with other styles — give one example.",
+   866→      result: "Feedback loops that made you measurably better — name a change it drove.",
+   867→    },
+   868→    tips: [
+   869→      "Never say \u201cany feedback is fine\u201d",
+   870→      "Show you act on feedback quickly",
+   871→      "Asking for it proactively is the real flex",
+   872→    ],
+   873→  },
+   874→  {
+   875→    id: "c5",
+   876→    category: "company",
+   877→    difficulty: "medium",
+   878→    question: "Where do you see yourself in two years?",
+   879→    star: {
+   880→      situation: "Your two-year arc: deeper expertise in {skill}, broader scope.",
+   881→      task: "Why this role is the right platform for that arc.",
+   882→      action: "Concrete markers: ownership, mentorship, a domain you want to master here.",
+   883→      result: "Their win: someone who grows in place instead of leaving.",
+   884→    },
+   885→    tips: [
+   886→      "Ambition plus commitment — in that order",
+   887→      "Anchor growth to this company, not away from it",
+   888→      "Avoid titles; talk about scope and impact",
+   889→    ],
+   890→  },
+   891→  {
+   892→    id: "c6",
+   893→    category: "company",
+   894→    difficulty: "easy",
+   895→    question: "What questions do you have for us?",
+   896→    star: {
+   897→      situation: "Have three ready: role, team, and success.",
+   898→      task: "The question that shows you already think like an insider.",
+   899→      action: "Ask about the biggest challenge in the first 90 days and how success is measured.",
+   900→      result: "Their answer tells you what you are really signing up for.",
+   901→    },
+   902→    tips: [
+   903→      "Never say \u201cI have no questions\u201d",
+   904→      "Ask about challenges, not perks — perks come later",
+   905→      "One question should reference something they said earlier",
+   906→    ],
+   907→  },
+   908→  {
+   909→    id: "c7",
+   910→    category: "company",
+   911→    difficulty: "medium",
+   912→    question: "Why should we hire you over other candidates?",
+   913→    star: {
+   914→      situation: "Acknowledge the competition gracefully — no trash talk.",
+   915→      task: "The two or three things this role actually needs.",
+   916→      action: "Match your proof: {skill} track record with numbers from {company}.",
+   917→      result: "The unique overlap: their need, your evidence, your excitement for this team.",
+   918→    },
+   919→    tips: [
+   920→      "Be confident, never cocky",
+   921→      "Answer the need behind the question",
+   922→      "End with genuine excitement, not a summary",
+   923→    ],
+   924→  },
+   925→  {
+   926→    id: "c8",
+   927→    category: "company",
+   928→    difficulty: "hard",
+   929→    question: "What would make you turn down an offer from us?",
+   930→    star: {
+   931→      situation: "Answer honestly but constructively — this is a values check.",
+   932→      task: "Your non-negotiables: growth, honesty, sustainable pace.",
+   933→      action: "How you would raise concerns early instead of silently leaving.",
+   934→      result: "Reassure them: most concerns are solvable when talked about early.",
+   935→    },
+   936→    tips: [
+   937→      "Lead with values — money alone is a weak answer",
+   938→      "Keep it to two non-negotiables, at most",
+   939→      "Show you resolve problems by talking, not leaving",
+   940→    ],
+   941→  },
+   942→];
+   943→
+   944→/* ============================== Generator ============================== */
+   945→
+   946→function shuffle<T>(input: readonly T[]): T[] {
+   947→  const arr = [...input];
+   948→  for (let i = arr.length - 1; i > 0; i--) {
+   949→    const j = Math.floor(Math.random() * (i + 1));
+   950→    const a = arr[i];
+   951→    const b = arr[j];
+   952→    if (a !== undefined && b !== undefined) {
+   953→      arr[i] = b;
+   954→      arr[j] = a;
+   955→    }
+   956→  }
+   957→  return arr;
+   958→}
+   959→
+   960→function instantiate(question: Question, resume: ResumeData): PracticeQuestion {
+   961→  const tailoredText = question.tailored?.(resume);
+   962→  const useTailored = typeof tailoredText === "string" && tailoredText.length > 0;
+   963→  return {
+   964→    ...question,
+   965→    text:
+   966→      useTailored && tailoredText
+   967→        ? tailoredText
+   968→        : resolvePlaceholders(question.question, resume),
+   969→    isTailored: useTailored,
+   970→    resolvedStar: resolveStar(question.star, resume),
+   971→  };
+   972→}
+   973→
+   974→/**
+   975→ * Builds a practice set: filters the bank by category + difficulty, shuffles,
+   976→ * prefers resume-tailored variants, and round-robins across categories so
+   977→ * every selected category is represented when possible.
+   978→ */
+   979→export function generateQuestions(
+   980→  resume: ResumeData,
+   981→  { categories, difficulty, count = 8 }: GenerateOptions
+   982→): PracticeQuestion[] {
+   983→  const allowed = categories.length > 0 ? categories : CATEGORY_ORDER;
+   984→  const pool = QUESTION_BANK.filter(
+   985→    (q) =>
+   986→      allowed.includes(q.category) &&
+   987→      (difficulty === "all" || q.difficulty === difficulty)
+   988→  );
+   989→
+   990→  // One shuffled, tailored-first bucket per selected category.
+   991→  const buckets = new Map<QuestionCategory, Question[]>();
+   992→  for (const cat of allowed) {
+   993→    const inCat = shuffle(pool.filter((q) => q.category === cat)).sort(
+   994→      (a, b) => Number(Boolean(b.tailored)) - Number(Boolean(a.tailored))
+   995→    );
+   996→    if (inCat.length > 0) buckets.set(cat, inCat);
+   997→  }
+   998→
+   999→  const picked: Question[] = [];
+  1000→  while (picked.length < count && buckets.size > 0) {
+  1001→    for (const [cat, queue] of buckets) {
+  1002→      const next = queue.shift();
+  1003→      if (next) picked.push(next);
+  1004→      if (queue.length === 0) buckets.delete(cat);
+  1005→      if (picked.length >= count) break;
+  1006→    }
+  1007→  }
+  1008→
+  1009→  return picked.map((q) => instantiate(q, resume));
+  1010→}
+  1011→

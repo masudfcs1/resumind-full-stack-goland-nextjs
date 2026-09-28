@@ -1,0 +1,915 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import Link from "next/link";
+     5→import {
+     6→  animate,
+     7→  motion,
+     8→  useInView,
+     9→  useMotionValue,
+    10→  useReducedMotion,
+    11→  useTransform,
+    12→} from "framer-motion";
+    13→import {
+    14→  ArrowRight,
+    15→  Bot,
+    16→  Check,
+    17→  Command,
+    18→  Crosshair,
+    19→  FileDown,
+    20→  GitCompareArrows,
+    21→  Globe,
+    22→  Kanban,
+    23→  LayoutTemplate,
+    24→  Linkedin,
+    25→  Mail,
+    26→  MessagesSquare,
+    27→  Plus,
+    28→  ShieldCheck,
+    29→  Sparkles,
+    30→  SpellCheck,
+    31→  Target,
+    32→  TrendingUp,
+    33→  Trophy,
+    34→  type LucideIcon,
+    35→} from "lucide-react";
+    36→import { cn } from "@/lib/utils";
+    37→import { CONTAINER, Reveal, SectionHeading } from "./shared";
+    38→
+    39→/* ---------------------------------------------------------------- */
+    40→/* Small building blocks                                             */
+    41→/* ---------------------------------------------------------------- */
+    42→
+    43→function CardShell({
+    44→  children,
+    45→  className,
+    46→  delay = 0,
+    47→  href,
+    48→  cta,
+    49→  label,
+    50→}: {
+    51→  children: React.ReactNode;
+    52→  className?: string;
+    53→  delay?: number;
+    54→  /** When set, the whole card becomes a deep link into the dashboard */
+    55→  href?: string;
+    56→  /** Visible pill text on hover / keyboard focus, e.g. "Open Tracker" */
+    57→  cta?: string;
+    58→  /** Accessible link name (defaults to cta) */
+    59→  label?: string;
+    60→}) {
+    61→  const linked = Boolean(href && cta);
+    62→  return (
+    63→    <Reveal delay={delay} className={className}>
+    64→      <div
+    65→        className={cn(
+    66→          "group relative flex h-full flex-col overflow-hidden rounded-2xl border bg-card p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-emerald-500/40 hover:shadow-xl hover:shadow-emerald-500/10 dark:hover:shadow-emerald-500/5 before:pointer-events-none before:absolute before:inset-0 before:z-10 before:-translate-x-full before:bg-gradient-to-r before:from-transparent before:via-emerald-400/15 before:to-transparent before:transition-transform before:duration-700 before:ease-out before:content-[''] group-hover:before:translate-x-full group-focus-within:before:translate-x-full dark:before:via-emerald-300/10",
+    67→          linked &&
+    68→            "cursor-pointer focus-within:border-emerald-500/70 focus-within:ring-2 focus-within:ring-emerald-500/30"
+    69→        )}
+    70→      >
+    71→        {children}
+    72→        {href && cta ? (
+    73→          <>
+    74→            {/* CTA pill — space is reserved in-flow (no layout shift), revealed on hover / keyboard focus */}
+    75→            <span
+    76→              aria-hidden
+    77→              className="pointer-events-none mt-auto flex items-center pt-4"
+    78→            >
+    79→              <span className="inline-flex translate-y-1 items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-600 opacity-0 transition-all duration-300 group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:translate-y-0 group-hover:opacity-100 dark:text-emerald-400">
+    80→                {cta}
+    81→                <ArrowRight
+    82→                  className="size-3 transition-transform duration-300 group-focus-within:translate-x-0.5 group-hover:translate-x-0.5"
+    83→                  aria-hidden
+    84→                />
+    85→              </span>
+    86→            </span>
+    87→            {/* Full-card hit area — decorative visuals stay aria-hidden below */}
+    88→            <Link
+    89→              href={href}
+    90→              className="absolute inset-0 z-20 rounded-2xl focus-visible:outline-none"
+    91→            >
+    92→              <span className="sr-only">{label ?? cta}</span>
+    93→            </Link>
+    94→          </>
+    95→        ) : null}
+    96→      </div>
+    97→    </Reveal>
+    98→  );
+    99→}
+   100→
+   101→function IconBadge({ icon: Icon, tint }: { icon: LucideIcon; tint: string }) {
+   102→  return (
+   103→    <span
+   104→      className={cn(
+   105→        "mb-4 flex size-11 items-center justify-center rounded-xl transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3 group-focus-within:scale-110 group-focus-within:-rotate-3",
+   106→        tint
+   107→      )}
+   108→    >
+   109→      <Icon className="size-5" aria-hidden />
+   110→    </span>
+   111→  );
+   112→}
+   113→
+   114→function CardTitle({ children }: { children: React.ReactNode }) {
+   115→  return (
+   116→    <h3 className="font-display text-base font-bold tracking-tight text-foreground">
+   117→      {children}
+   118→    </h3>
+   119→  );
+   120→}
+   121→
+   122→function CardDesc({ children }: { children: React.ReactNode }) {
+   123→  return <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{children}</p>;
+   124→}
+   125→
+   126→/* Faint emerald dot-grid + radial glow for the two wide anchor cards */
+   127→function CardDecor() {
+   128→  return (
+   129→    <div aria-hidden className="pointer-events-none absolute inset-0">
+   130→      <div
+   131→        className="absolute inset-0 opacity-80 dark:opacity-40"
+   132→        style={{
+   133→          backgroundImage:
+   134→            "radial-gradient(circle at 1px 1px, rgba(16, 185, 129, 0.16) 1px, transparent 0)",
+   135→          backgroundSize: "17px 17px",
+   136→          WebkitMaskImage:
+   137→            "radial-gradient(130% 110% at 100% 0%, black 25%, transparent 72%)",
+   138→          maskImage:
+   139→            "radial-gradient(130% 110% at 100% 0%, black 25%, transparent 72%)",
+   140→        }}
+   141→      />
+   142→      <div
+   143→        className="absolute -right-20 -top-24 size-64 rounded-full opacity-70 dark:opacity-35"
+   144→        style={{
+   145→          background: "radial-gradient(circle, rgba(20, 184, 166, 0.16), transparent 65%)",
+   146→        }}
+   147→      />
+   148→    </div>
+   149→  );
+   150→}
+   151→
+   152→/* Shared accent tint map (chips + avatar dots) */
+   153→const TINTS = {
+   154→  emerald: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+   155→  violet: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+   156→  amber: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+   157→} as const;
+   158→
+   159→type Tint = keyof typeof TINTS;
+   160→
+   161→/* Animated mini score gauge for the ATS card */
+   162→function ScoreGauge() {
+   163→  const R = 30;
+   164→  const C = 2 * Math.PI * R;
+   165→  return (
+   166→    <div className="relative size-[84px] shrink-0">
+   167→      <svg viewBox="0 0 76 76" className="size-full -rotate-90">
+   168→        <circle cx="38" cy="38" r={R} fill="none" strokeWidth="7" className="stroke-muted" />
+   169→        <motion.circle
+   170→          cx="38"
+   171→          cy="38"
+   172→          r={R}
+   173→          fill="none"
+   174→          strokeWidth="7"
+   175→          strokeLinecap="round"
+   176→          stroke="url(#bento-gauge-grad)"
+   177→          strokeDasharray={C}
+   178→          initial={{ strokeDashoffset: C }}
+   179→          whileInView={{ strokeDashoffset: C * (1 - 0.94) }}
+   180→          viewport={{ once: true, margin: "-60px" }}
+   181→          transition={{ duration: 1.6, ease: "easeOut", delay: 0.3 }}
+   182→        />
+   183→        <defs>
+   184→          <linearGradient id="bento-gauge-grad" x1="0" y1="0" x2="1" y2="1">
+   185→            <stop offset="0%" stopColor="#10b981" />
+   186→            <stop offset="100%" stopColor="#14b8a6" />
+   187→          </linearGradient>
+   188→        </defs>
+   189→      </svg>
+   190→      <div className="absolute inset-0 flex flex-col items-center justify-center">
+   191→        <span className="font-display text-xl font-extrabold leading-none text-foreground">94</span>
+   192→        <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+   193→          /100
+   194→        </span>
+   195→      </div>
+   196→    </div>
+   197→  );
+   198→}
+   199→
+   200→function MiniBar({ label, value, delay }: { label: string; value: number; delay: number }) {
+   201→  return (
+   202→    <div>
+   203→      <div className="mb-1 flex items-center justify-between text-[11px]">
+   204→        <span className="font-medium text-muted-foreground">{label}</span>
+   205→        <span className="font-bold text-foreground">{value}%</span>
+   206→      </div>
+   207→      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+   208→        <motion.div
+   209→          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400"
+   210→          initial={{ width: "0%" }}
+   211→          whileInView={{ width: `${value}%` }}
+   212→          viewport={{ once: true, margin: "-60px" }}
+   213→          transition={{ duration: 1.1, delay, ease: "easeOut" }}
+   214→        />
+   215→      </div>
+   216→    </div>
+   217→  );
+   218→}
+   219→
+   220→/* ---------------------------------------------------------------- */
+   221→/* Job application tracker — abstract mini Kanban                    */
+   222→/* ---------------------------------------------------------------- */
+   223→
+   224→function MicroCard({
+   225→  initials,
+   226→  tint,
+   227→  className,
+   228→}: {
+   229→  initials: string;
+   230→  tint: Tint;
+   231→  className?: string;
+   232→}) {
+   233→  return (
+   234→    <div
+   235→      className={cn(
+   236→        "rounded-lg border border-border/60 bg-card px-2 py-1.5 shadow-sm dark:border-border/35",
+   237→        className
+   238→      )}
+   239→    >
+   240→      <div className="flex items-center gap-1.5">
+   241→        <span
+   242→          className={cn(
+   243→            "flex size-4 shrink-0 items-center justify-center rounded-[5px] text-[7px] font-extrabold",
+   244→            TINTS[tint]
+   245→          )}
+   246→        >
+   247→          {initials}
+   248→        </span>
+   249→        <span className="h-1.5 w-10 rounded-full bg-foreground/20 dark:bg-foreground/25" />
+   250→      </div>
+   251→      <div className="mt-1.5 flex items-center gap-1">
+   252→        <span className="h-1 w-8 rounded-full bg-muted-foreground/30 dark:bg-muted-foreground/25" />
+   253→        <span className="ml-auto h-1 w-5 rounded-full bg-muted-foreground/20" />
+   254→      </div>
+   255→    </div>
+   256→  );
+   257→}
+   258→
+   259→function KanbanColumnHeader({
+   260→  label,
+   261→  count,
+   262→  dotClass,
+   263→  labelClass,
+   264→}: {
+   265→  label: string;
+   266→  count: string;
+   267→  dotClass: string;
+   268→  labelClass: string;
+   269→}) {
+   270→  return (
+   271→    <div className="mb-2 flex items-center gap-1.5 px-0.5">
+   272→      <span className={cn("size-1.5 rounded-full", dotClass)} />
+   273→      <span className={cn("text-[9px] font-bold uppercase tracking-wider", labelClass)}>
+   274→        {label}
+   275→      </span>
+   276→      <span className={cn("ml-auto text-[9px] font-bold opacity-50", labelClass)}>{count}</span>
+   277→    </div>
+   278→  );
+   279→}
+   280→
+   281→function KanbanMini() {
+   282→  const reduced = useReducedMotion();
+   283→  return (
+   284→    <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-2.5" aria-hidden>
+   285→      {/* Applied (violet) */}
+   286→      <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-2 dark:border-violet-400/15 dark:bg-violet-400/[0.05]">
+   287→        <KanbanColumnHeader
+   288→          label="Applied"
+   289→          count="2"
+   290→          dotClass="bg-violet-500 dark:bg-violet-400"
+   291→          labelClass="text-violet-700 dark:text-violet-300"
+   292→        />
+   293→        <div className="space-y-1.5">
+   294→          <MicroCard initials="VE" tint="violet" />
+   295→          {/* Card gently nudging toward the Interview column (static when reduced motion) */}
+   296→          <motion.div
+   297→            className="relative"
+   298→            animate={reduced ? { x: 0 } : { x: [0, 4, 0] }}
+   299→            transition={reduced ? { duration: 0 } : { duration: 3, repeat: Infinity, ease: "easeInOut" }}
+   300→          >
+   301→            <MicroCard initials="LI" tint="violet" />
+   302→            <motion.span
+   303→              className={cn(
+   304→                "absolute -right-2 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center rounded-full border border-amber-500/40 bg-background shadow-sm",
+   305→                reduced && "opacity-70"
+   306→              )}
+   307→              animate={reduced ? { opacity: 0.7 } : { opacity: [0, 1, 0] }}
+   308→              transition={reduced ? { duration: 0 } : { duration: 3, repeat: Infinity, ease: "easeInOut" }}
+   309→            >
+   310→              <ArrowRight className="size-2.5 text-amber-600 dark:text-amber-400" />
+   311→            </motion.span>
+   312→          </motion.div>
+   313→        </div>
+   314→      </div>
+   315→
+   316→      {/* Interview (amber) */}
+   317→      <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-2 dark:border-amber-400/15 dark:bg-amber-400/[0.05]">
+   318→        <KanbanColumnHeader
+   319→          label="Interview"
+   320→          count="1"
+   321→          dotClass="bg-amber-500 dark:bg-amber-400"
+   322→          labelClass="text-amber-700 dark:text-amber-300"
+   323→        />
+   324→        <div className="space-y-1.5">
+   325→          <MicroCard initials="ST" tint="amber" />
+   326→          {/* Empty drop slot — destination of the nudging card */}
+   327→          <div className="h-8 rounded-lg border border-dashed border-amber-500/30 dark:border-amber-400/20" />
+   328→        </div>
+   329→      </div>
+   330→
+   331→      {/* Offer (emerald, winning card elevated + trophy) */}
+   332→      <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-2 dark:border-emerald-400/15 dark:bg-emerald-400/[0.06]">
+   333→        <KanbanColumnHeader
+   334→          label="Offer"
+   335→          count="1"
+   336→          dotClass="bg-emerald-500 dark:bg-emerald-400"
+   337→          labelClass="text-emerald-700 dark:text-emerald-300"
+   338→        />
+   339→        <div className="relative">
+   340→          <MicroCard
+   341→            initials="AN"
+   342→            tint="emerald"
+   343→            className="-translate-y-0.5 border-emerald-500/50 shadow-md shadow-emerald-500/15 ring-1 ring-emerald-500/40"
+   344→          />
+   345→          <span className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-sm">
+   346→            <Trophy className="size-2.5" />
+   347→          </span>
+   348→        </div>
+   349→      </div>
+   350→    </div>
+   351→  );
+   352→}
+   353→
+   354→/* ---------------------------------------------------------------- */
+   355→/* Interview prep — fanned flashcards                                */
+   356→/* ---------------------------------------------------------------- */
+   357→
+   358→function FlashcardFan() {
+   359→  return (
+   360→    <div className="relative h-28 w-44 shrink-0 self-center" aria-hidden>
+   361→      <div className="absolute inset-0 rotate-6 rounded-xl border border-border/60 bg-muted/40 dark:bg-muted/20" />
+   362→      <div className="absolute inset-0 -rotate-6 rounded-xl border border-border/60 bg-muted/40 dark:bg-muted/20" />
+   363→      <motion.div
+   364→        initial={{ opacity: 0, rotate: -4, y: 12 }}
+   365→        whileInView={{ opacity: 1, rotate: 0, y: 0 }}
+   366→        viewport={{ once: true, margin: "-60px" }}
+   367→        transition={{ duration: 0.55, delay: 0.35, ease: [0.21, 0.47, 0.32, 0.98] }}
+   368→        className="absolute inset-0 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 p-3 shadow-lg shadow-emerald-500/25"
+   369→      >
+   370→        <Sparkles className="size-4 text-white/90" />
+   371→        <div className="mt-2.5 space-y-1.5">
+   372→          <div className="h-1.5 w-3/4 rounded-full bg-white/50" />
+   373→          <div className="h-1.5 w-1/2 rounded-full bg-white/30" />
+   374→          <div className="h-1.5 w-2/3 rounded-full bg-white/20" />
+   375→        </div>
+   376→      </motion.div>
+   377→    </div>
+   378→  );
+   379→}
+   380→
+   381→/* ---------------------------------------------------------------- */
+   382→/* Resume comparison — A/B papers + delta pill                       */
+   383→/* ---------------------------------------------------------------- */
+   384→
+   385→function PaperMini({ label, score, strong }: { label: string; score: string; strong?: boolean }) {
+   386→  return (
+   387→    <div
+   388→      className={cn(
+   389→        "w-24 rounded-lg border bg-card p-2 sm:w-28",
+   390→        strong
+   391→          ? "border-emerald-500/50 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500/30"
+   392→          : "border-border/60 shadow-sm dark:border-border/35"
+   393→      )}
+   394→    >
+   395→      <div className="flex items-center justify-between">
+   396→        <span
+   397→          className={cn(
+   398→            "flex size-4 items-center justify-center rounded-[5px] text-[8px] font-extrabold",
+   399→            strong
+   400→              ? TINTS.emerald
+   401→              : "bg-muted text-muted-foreground"
+   402→          )}
+   403→        >
+   404→          {label}
+   405→        </span>
+   406→        <span
+   407→          className={cn(
+   408→            "flex h-4 min-w-[26px] items-center justify-center rounded-full px-1 text-[8px] font-bold tabular-nums",
+   409→            strong ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"
+   410→          )}
+   411→        >
+   412→          {score}
+   413→        </span>
+   414→      </div>
+   415→      <div className="mt-2 space-y-1">
+   416→        <div className="h-1.5 w-4/5 rounded-full bg-foreground/20 dark:bg-foreground/25" />
+   417→        <div
+   418→          className={cn(
+   419→            "h-1 w-full rounded-full",
+   420→            strong ? "bg-emerald-500/40" : "bg-muted-foreground/20"
+   421→          )}
+   422→        />
+   423→        <div className="h-1 w-3/5 rounded-full bg-muted-foreground/25" />
+   424→        <div className="h-1 w-2/3 rounded-full bg-muted-foreground/20" />
+   425→      </div>
+   426→    </div>
+   427→  );
+   428→}
+   429→
+   430→/* "+12 pts" pill that counts up when scrolled into view */
+   431→function DeltaPill() {
+   432→  const ref = React.useRef<HTMLSpanElement>(null);
+   433→  const inView = useInView(ref, { once: true, margin: "-60px" });
+   434→  const mv = useMotionValue(0);
+   435→  const text = useTransform(mv, (v: number) => `+${Math.round(v)} pts`);
+   436→
+   437→  React.useEffect(() => {
+   438→    if (!inView) return;
+   439→    const controls = animate(mv, 12, { duration: 1.4, ease: "easeOut", delay: 0.5 });
+   440→    return () => controls.stop();
+   441→  }, [inView, mv]);
+   442→
+   443→  return (
+   444→    <span
+   445→      ref={ref}
+   446→      className="absolute -bottom-3 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1 rounded-full border border-emerald-500/30 bg-background/90 px-2.5 py-1 text-[10px] font-extrabold text-emerald-600 shadow-sm backdrop-blur-sm dark:border-emerald-400/25 dark:text-emerald-400"
+   447→    >
+   448→      <TrendingUp className="size-3" aria-hidden />
+   449→      <motion.span className="tabular-nums">{text}</motion.span>
+   450→    </span>
+   451→  );
+   452→}
+   453→
+   454→function CompareVisual() {
+   455→  return (
+   456→    <div className="relative mx-auto mt-6 w-fit pb-3" aria-hidden>
+   457→      <div className="flex items-center gap-3 sm:gap-4">
+   458→        <PaperMini label="A" score="94" strong />
+   459→        <div className="z-10 flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-[10px] font-extrabold text-white shadow-md shadow-emerald-500/30">
+   460→          VS
+   461→        </div>
+   462→        <PaperMini label="B" score="82" />
+   463→      </div>
+   464→      <DeltaPill />
+   465→    </div>
+   466→  );
+   467→}
+   468→
+   469→/* ---------------------------------------------------------------- */
+   470→/* Job match scanner — mini gauge + keyword chips                    */
+   471→/* ---------------------------------------------------------------- */
+   472→
+   473→function MatchRing() {
+   474→  const R = 22;
+   475→  const C = 2 * Math.PI * R;
+   476→  const reduced = useReducedMotion();
+   477→  return (
+   478→    <div className="relative size-14 shrink-0">
+   479→      {/* Rotating dashed halo — reads as a continuous scan sweep (frozen when reduced motion) */}
+   480→      <motion.span
+   481→        className="absolute -inset-[5px] rounded-full border border-dashed border-emerald-500/30 dark:border-emerald-400/25"
+   482→        animate={reduced ? { rotate: 0 } : { rotate: 360 }}
+   483→        transition={reduced ? { duration: 0 } : { duration: 7, repeat: Infinity, ease: "linear" }}
+   484→      />
+   485→      <svg viewBox="0 0 56 56" className="size-full -rotate-90">
+   486→        <circle cx="28" cy="28" r={R} fill="none" strokeWidth="6" className="stroke-muted" />
+   487→        <motion.circle
+   488→          cx="28"
+   489→          cy="28"
+   490→          r={R}
+   491→          fill="none"
+   492→          strokeWidth="6"
+   493→          strokeLinecap="round"
+   494→          stroke="url(#bento-match-grad)"
+   495→          strokeDasharray={C}
+   496→          initial={{ strokeDashoffset: C }}
+   497→          whileInView={{ strokeDashoffset: C * (1 - 0.88) }}
+   498→          viewport={{ once: true, margin: "-60px" }}
+   499→          transition={{ duration: 1.5, ease: "easeOut", delay: 0.3 }}
+   500→        />
+   501→        <defs>
+   502→          <linearGradient id="bento-match-grad" x1="0" y1="0" x2="1" y2="1">
+   503→            <stop offset="0%" stopColor="#10b981" />
+   504→            <stop offset="100%" stopColor="#14b8a6" />
+   505→          </linearGradient>
+   506→        </defs>
+   507→      </svg>
+   508→      <div className="absolute inset-0 flex flex-col items-center justify-center">
+   509→        <span className="font-display text-sm font-extrabold leading-none text-foreground">88</span>
+   510→        <span className="text-[8px] font-semibold uppercase tracking-wider text-muted-foreground">
+   511→          match
+   512→        </span>
+   513→      </div>
+   514→    </div>
+   515→  );
+   516→}
+   517→
+   518→function MatchChip({
+   519→  label,
+   520→  matched,
+   521→  delay,
+   522→}: {
+   523→  label: string;
+   524→  matched: boolean;
+   525→  delay: number;
+   526→}) {
+   527→  return (
+   528→    <motion.span
+   529→      initial={{ opacity: 0, scale: 0.6 }}
+   530→      whileInView={{ opacity: 1, scale: 1 }}
+   531→      viewport={{ once: true, margin: "-60px" }}
+   532→      transition={{ duration: 0.35, delay, ease: [0.21, 0.47, 0.32, 0.98] }}
+   533→      className={cn(
+   534→        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+   535→        matched
+   536→          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+   537→          : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+   538→      )}
+   539→    >
+   540→      {matched ? <Check className="size-2.5" /> : <Plus className="size-2.5" />}
+   541→      {label}
+   542→    </motion.span>
+   543→  );
+   544→}
+   545→
+   546→function JobMatchVisual() {
+   547→  return (
+   548→    <div
+   549→      className="relative mt-5 rounded-xl border border-border/70 bg-muted/40 p-3.5"
+   550→      aria-hidden
+   551→    >
+   552→      <div className="flex items-center gap-3.5">
+   553→        <MatchRing />
+   554→        <div className="min-w-0">
+   555→          <p className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+   556→            Strong match
+   557→          </p>
+   558→          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+   559→            2 keywords to weave in
+   560→          </p>
+   561→        </div>
+   562→      </div>
+   563→      <div className="mt-3 flex flex-wrap gap-1">
+   564→        <MatchChip label="React" matched delay={0.4} />
+   565→        <MatchChip label="TypeScript" matched delay={0.5} />
+   566→        <MatchChip label="GraphQL" matched={false} delay={0.6} />
+   567→        <MatchChip label="CI/CD" matched={false} delay={0.7} />
+   568→      </div>
+   569→    </div>
+   570→  );
+   571→}
+   572→
+   573→/* ---------------------------------------------------------------- */
+   574→/* Section                                                           */
+   575→/* ---------------------------------------------------------------- */
+   576→
+   577→export default function Features() {
+   578→  return (
+   579→    <section id="features" aria-label="Features" className="scroll-mt-20 py-20 sm:py-28">
+   580→      <div className={CONTAINER}>
+   581→        <SectionHeading
+   582→          eyebrow={<><Target className="size-3" aria-hidden /> Features</>}
+   583→          title="Everything you need to get hired"
+   584→          description="One workspace that writes, scores, and ships resumes that pass automated screens — then tracks every application and drills you for the interview, all the way to the offer."
+   585→        />
+   586→
+   587→        <div className="mt-14 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+   588→          {/* Row 1 · Anchor: ATS score scanner */}
+   589→          <CardShell
+   590→            className="md:col-span-2"
+   591→            delay={0}
+   592→            href="/dashboard/ats"
+   593→            cta="Open ATS Scanner"
+   594→            label="Open the ATS score scanner"
+   595→          >
+   596→            <CardDecor />
+   597→            <div className="relative">
+   598→              <div className="flex items-start justify-between gap-4">
+   599→                <div>
+   600→                  <IconBadge icon={Target} tint="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" />
+   601→                  <CardTitle>ATS score scanner</CardTitle>
+   602→                  <CardDesc>
+   603→                    Scan any resume against real job descriptions. See exactly what
+   604→                    recruiters&apos; software sees — and what to fix before you apply.
+   605→                  </CardDesc>
+   606→                </div>
+   607→                <ScoreGauge />
+   608→              </div>
+   609→              <div className="mt-5 grid gap-3.5 border-t border-border/60 pt-5 sm:grid-cols-3">
+   610→                <MiniBar label="Keyword match" value={96} delay={0.35} />
+   611→                <MiniBar label="Formatting" value={92} delay={0.5} />
+   612→                <MiniBar label="Impact language" value={89} delay={0.65} />
+   613→              </div>
+   614→            </div>
+   615→          </CardShell>
+   616→
+   617→          {/* Row 1 · Anchor: AI writing assistant */}
+   618→          <CardShell
+   619→            className="md:col-span-2"
+   620→            delay={0.08}
+   621→            href="/dashboard/builder"
+   622→            cta="Open Studio"
+   623→            label="Open the AI writing assistant in Resume Studio"
+   624→          >
+   625→            <CardDecor />
+   626→            <div className="relative">
+   627→              <IconBadge icon={Bot} tint="bg-teal-500/15 text-teal-600 dark:text-teal-400" />
+   628→              <CardTitle>AI writing assistant</CardTitle>
+   629→              <CardDesc>
+   630→                Turn weak duties into quantified achievements. The AI rewrites every
+   631→                bullet with strong verbs, metrics, and role-specific keywords.
+   632→              </CardDesc>
+   633→              <div className="mt-5 space-y-2.5 rounded-xl border border-border/70 bg-muted/40 p-3.5 text-xs leading-relaxed">
+   634→                <div className="flex items-start gap-2 text-muted-foreground">
+   635→                  <span className="mt-0.5 h-4 w-1 rounded-full bg-rose-400/70" aria-hidden />
+   636→                  <span className="line-through decoration-rose-400/60">
+   637→                    Responsible for managing the company social media accounts
+   638→                  </span>
+   639→                </div>
+   640→                <motion.div
+   641→                  initial={{ opacity: 0, x: -8 }}
+   642→                  whileInView={{ opacity: 1, x: 0 }}
+   643→                  viewport={{ once: true, margin: "-60px" }}
+   644→                  transition={{ delay: 0.7, duration: 0.5 }}
+   645→                  className="flex items-start gap-2 font-medium text-foreground"
+   646→                >
+   647→                  <span className="mt-0.5 h-4 w-1 rounded-full bg-emerald-500" aria-hidden />
+   648→                  <span>
+   649→                    Grew social audience 0 → 85K followers, driving 32% of new
+   650→                    signups within 6 months
+   651→                    <span
+   652→                      className="ml-0.5 inline-block h-3 w-0.5 animate-caret-blink rounded-full bg-emerald-500 align-baseline motion-reduce:animate-none"
+   653→                      aria-hidden
+   654→                    />
+   655→                  </span>
+   656→                </motion.div>
+   657→                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+   658→                  <Bot className="size-3" aria-hidden /> AI improved
+   659→                </span>
+   660→              </div>
+   661→            </div>
+   662→          </CardShell>
+   663→
+   664→          {/* Row 2 · Standard: templates */}
+   665→          <CardShell
+   666→            delay={0}
+   667→            href="/dashboard/templates"
+   668→            cta="Open Templates"
+   669→            label="Browse the resume template gallery"
+   670→          >
+   671→            <IconBadge icon={LayoutTemplate} tint="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" />
+   672→            <CardTitle>60+ ATS templates</CardTitle>
+   673→            <CardDesc>
+   674→              Recruiter-approved designs for every field and career stage — all
+   675→              parse-perfect.
+   676→            </CardDesc>
+   677→          </CardShell>
+   678→
+   679→          {/* Row 2 · Standard: grammar */}
+   680→          <CardShell
+   681→            delay={0.06}
+   682→            href="/dashboard/grammar"
+   683→            cta="Open Grammar Check"
+   684→            label="Open the grammar checker"
+   685→          >
+   686→            <IconBadge icon={SpellCheck} tint="bg-amber-500/15 text-amber-600 dark:text-amber-400" />
+   687→            <CardTitle>Grammar checker</CardTitle>
+   688→            <CardDesc>
+   689→              Catch typos, tense slips, and awkward phrasing before a recruiter
+   690→              ever does.
+   691→            </CardDesc>
+   692→          </CardShell>
+   693→
+   694→          {/* Row 2 · Wide: job application tracker */}
+   695→          <CardShell
+   696→            className="md:col-span-2"
+   697→            delay={0.12}
+   698→            href="/dashboard/tracker"
+   699→            cta="Open Tracker"
+   700→            label="Open the job application tracker"
+   701→          >
+   702→            <IconBadge icon={Kanban} tint="bg-violet-500/15 text-violet-600 dark:text-violet-400" />
+   703→            <CardTitle>Job application tracker</CardTitle>
+   704→            <CardDesc>
+   705→              Drag every application through Applied → Interview → Offer and
+   706→              always know exactly where you stand.
+   707→            </CardDesc>
+   708→            <KanbanMini />
+   709→          </CardShell>
+   710→
+   711→          {/* Row 3 · Wide: interview prep */}
+   712→          <CardShell
+   713→            className="md:col-span-2"
+   714→            delay={0}
+   715→            href="/dashboard/interview"
+   716→            cta="Open Interview Prep"
+   717→            label="Open the interview prep trainer"
+   718→          >
+   719→            <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:gap-8">
+   720→              <div className="min-w-0 flex-1">
+   721→                <IconBadge icon={MessagesSquare} tint="bg-amber-500/15 text-amber-600 dark:text-amber-400" />
+   722→                <CardTitle>Interview prep trainer</CardTitle>
+   723→                <CardDesc>
+   724→                  Drill a 45-question bank with STAR model answers tailored to
+   725→                  your resume — so nothing surprises you in the room.
+   726→                </CardDesc>
+   727→                <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-hidden>
+   728→                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold", TINTS.emerald)}>
+   729→                    Behavioral
+   730→                  </span>
+   731→                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold", TINTS.violet)}>
+   732→                    Technical
+   733→                  </span>
+   734→                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold", TINTS.amber)}>
+   735→                    Situational
+   736→                  </span>
+   737→                </div>
+   738→                <div className="mt-4 max-w-[240px]">
+   739→                  <div className="mb-1 flex items-center justify-between text-[11px]">
+   740→                    <span className="font-medium text-muted-foreground">Practice progress</span>
+   741→                    <span className="font-bold text-foreground">5/8 practiced</span>
+   742→                  </div>
+   743→                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+   744→                    <motion.div
+   745→                      className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400"
+   746→                      initial={{ width: "0%" }}
+   747→                      whileInView={{ width: "62.5%" }}
+   748→                      viewport={{ once: true, margin: "-60px" }}
+   749→                      transition={{ duration: 1.1, delay: 0.45, ease: "easeOut" }}
+   750→                    />
+   751→                  </div>
+   752→                </div>
+   753→              </div>
+   754→              <FlashcardFan />
+   755→            </div>
+   756→          </CardShell>
+   757→
+   758→          {/* Row 3 · Standard: cover letters */}
+   759→          <CardShell
+   760→            delay={0.06}
+   761→            href="/dashboard/cover-letter"
+   762→            cta="Open Cover Letters"
+   763→            label="Open the cover letter generator"
+   764→          >
+   765→            <IconBadge icon={Mail} tint="bg-rose-500/15 text-rose-600 dark:text-rose-400" />
+   766→            <CardTitle>AI cover letters</CardTitle>
+   767→            <CardDesc>
+   768→              Tailored cover letters generated from your resume and the job post
+   769→              in seconds.
+   770→            </CardDesc>
+   771→          </CardShell>
+   772→
+   773→          {/* Row 3 · Standard: portfolio */}
+   774→          <CardShell
+   775→            delay={0.12}
+   776→            href="/dashboard/portfolio"
+   777→            cta="Open Portfolio"
+   778→            label="Open the portfolio site generator"
+   779→          >
+   780→            <IconBadge icon={Globe} tint="bg-teal-500/15 text-teal-600 dark:text-teal-400" />
+   781→            <CardTitle>Portfolio sites</CardTitle>
+   782→            <CardDesc>
+   783→              Turn your resume into a shareable one-page portfolio website
+   784→              instantly.
+   785→            </CardDesc>
+   786→          </CardShell>
+   787→
+   788→          {/* Row 4 · Wide: LinkedIn import */}
+   789→          <CardShell
+   790→            className="md:col-span-2"
+   791→            delay={0}
+   792→            href="/dashboard/linkedin"
+   793→            cta="Open LinkedIn Import"
+   794→            label="Open the LinkedIn import tool"
+   795→          >
+   796→            <IconBadge icon={Linkedin} tint="bg-emerald-600/15 text-emerald-700 dark:text-emerald-300" />
+   797→            <CardTitle>LinkedIn import</CardTitle>
+   798→            <CardDesc>
+   799→              Paste your LinkedIn profile URL and watch a full draft resume appear
+   800→              — experience, skills, and all.
+   801→            </CardDesc>
+   802→            <div className="mt-5 flex items-center gap-2 rounded-xl border border-border/70 bg-muted/40 p-2 pl-3.5 text-xs">
+   803→              <span className="flex-1 truncate font-medium text-muted-foreground">
+   804→                linkedin.com/in/your-profile
+   805→              </span>
+   806→              <span className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-2.5 py-1.5 text-[11px] font-bold text-white">
+   807→                <Linkedin className="size-3" aria-hidden /> Import
+   808→              </span>
+   809→            </div>
+   810→          </CardShell>
+   811→
+   812→          {/* Row 4 · Wide: resume comparison */}
+   813→          <CardShell
+   814→            className="md:col-span-2"
+   815→            delay={0.08}
+   816→            href="/dashboard/compare"
+   817→            cta="Open Compare"
+   818→            label="Open the resume comparison tool"
+   819→          >
+   820→            <IconBadge icon={GitCompareArrows} tint="bg-teal-500/15 text-teal-600 dark:text-teal-400" />
+   821→            <CardTitle>Resume comparison</CardTitle>
+   822→            <CardDesc>
+   823→              Put two versions head-to-head: a side-by-side ATS diff, keyword
+   824→              edge, and per-section score deltas show which draft is stronger.
+   825→            </CardDesc>
+   826→            <CompareVisual />
+   827→          </CardShell>
+   828→
+   829→          {/* Row 5 · Standard: PDF export */}
+   830→          <CardShell
+   831→            delay={0}
+   832→            href="/dashboard/builder"
+   833→            cta="Open Studio"
+   834→            label="Open Resume Studio to export your resume as a PDF"
+   835→          >
+   836→            <IconBadge icon={FileDown} tint="bg-violet-500/15 text-violet-600 dark:text-violet-400" />
+   837→            <CardTitle>1-click PDF export</CardTitle>
+   838→            <CardDesc>
+   839→              Pixel-perfect A4 PDFs that keep your formatting intact on any
+   840→              recruiter&apos;s screen — attachments, printouts, portals.
+   841→            </CardDesc>
+   842→            <div className="mt-5 rounded-xl border border-border/70 bg-muted/40 p-3.5">
+   843→              <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] font-medium">
+   844→                <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+   845→                  <FileDown className="size-3.5 shrink-0 text-violet-500 dark:text-violet-400" aria-hidden />
+   846→                  <span className="truncate">alex_resume.pdf</span>
+   847→                </span>
+   848→                <span className="shrink-0 font-bold text-emerald-600 dark:text-emerald-400">1.2 MB ✓</span>
+   849→              </div>
+   850→              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+   851→                <motion.div
+   852→                  className="h-full rounded-full bg-gradient-to-r from-violet-500 to-emerald-500"
+   853→                  initial={{ width: "0%" }}
+   854→                  whileInView={{ width: "100%" }}
+   855→                  viewport={{ once: true, margin: "-60px" }}
+   856→                  transition={{ duration: 1.4, ease: "easeOut" }}
+   857→                />
+   858→              </div>
+   859→            </div>
+   860→          </CardShell>
+   861→
+   862→          {/* Row 5 · Standard: job match scanner */}
+   863→          <CardShell
+   864→            delay={0.06}
+   865→            href="/dashboard/match"
+   866→            cta="Open Job Match"
+   867→            label="Open the job match scanner"
+   868→          >
+   869→            <IconBadge icon={Crosshair} tint="bg-teal-500/15 text-teal-600 dark:text-teal-400" />
+   870→            <CardTitle>Job match scanner</CardTitle>
+   871→            <CardDesc>
+   872→              Paste a job description and get an instant match score with the
+   873→              exact keywords to add.
+   874→            </CardDesc>
+   875→            <JobMatchVisual />
+   876→          </CardShell>
+   877→
+   878→          {/* Row 5 · Standard: private by design */}
+   879→          <CardShell delay={0.12}>
+   880→            <IconBadge icon={ShieldCheck} tint="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" />
+   881→            <CardTitle>Private by design</CardTitle>
+   882→            <CardDesc>
+   883→              Everything runs and stores right in your browser — your resume
+   884→              never leaves your machine.
+   885→            </CardDesc>
+   886→          </CardShell>
+   887→
+   888→          {/* Row 5 · Standard: keyboard-first */}
+   889→          <CardShell delay={0.18}>
+   890→            <IconBadge icon={Command} tint="bg-amber-500/15 text-amber-600 dark:text-amber-400" />
+   891→            <CardTitle>Keyboard-first</CardTitle>
+   892→            <CardDesc>
+   893→              Jump anywhere with the ⌘K command palette — every tool is one
+   894→              keystroke away.
+   895→            </CardDesc>
+   896→            <div
+   897→              className="mt-4 flex items-center gap-2 text-[11px] text-muted-foreground"
+   898→              aria-hidden
+   899→            >
+   900→              <kbd className="rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-foreground">
+   901→                ⌘K
+   902→              </kbd>
+   903→              <span className="h-3 w-px bg-border" />
+   904→              <kbd className="rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-foreground">
+   905→                N
+   906→              </kbd>
+   907→              <span>new resume</span>
+   908→            </div>
+   909→          </CardShell>
+   910→        </div>
+   911→      </div>
+   912→    </section>
+   913→  );
+   914→}
+   915→

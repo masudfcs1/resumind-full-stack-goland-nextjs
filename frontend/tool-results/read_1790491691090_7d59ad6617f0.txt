@@ -1,0 +1,727 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import type { ResumeData } from "./resume-store";
+     4→     4→import { formatMonth } from "./resume-store";
+     5→     5→
+     6→     6→/* ============================== utils ============================== */
+     7→     7→
+     8→     8→export function sleep(ms: number): Promise<void> {
+     9→     9→  return new Promise((res) => setTimeout(res, ms));
+    10→    10→}
+    11→    11→
+    12→    12→function pick<T>(arr: T[]): T {
+    13→    13→  return arr[Math.floor(Math.random() * arr.length)];
+    14→    14→}
+    15→    15→
+    16→    16→/* ============================== AI Resume Writing ============================== */
+    17→    17→
+    18→    18→const SUMMARY_TEMPLATES: Record<string, string[]> = {
+    19→    19→  professional: [
+    20→    20→    "{title} with {years}+ years of experience delivering measurable impact across {domain}. Proven track record of {highlight} while leveraging {skills}. Recognized for driving results in fast-paced, cross-functional environments.",
+    21→    21→    "Results-oriented {title} bringing {years}+ years of expertise in {domain}. Skilled in {skills}, with a history of {highlight}. Passionate about turning complex problems into elegant, shippable solutions.",
+    22→    22→  ],
+    23→    23→  confident: [
+    24→    24→    "Award-winning {title} with {years}+ years turning ambitious roadmaps into shipped products. I {highlight} — and I bring deep hands-on mastery of {skills} to every team I join.",
+    25→    25→    "High-impact {title} with {years}+ years of experience. I specialize in {domain}, regularly {highlight}. My toolkit centers on {skills}, and my bias is always toward measurable outcomes.",
+    26→    26→  ],
+    27→    27→  friendly: [
+    28→    28→    "Hey there — I'm a {title} with {years}+ years of experience who loves {domain}. My happy place is {highlight}, usually powered by {skills}. I thrive on teams that care about craft and kindness in equal measure.",
+    29→    29→    "{title} with {years}+ years of experience and a genuine enthusiasm for {domain}. Known for {highlight} and for bringing positive energy (and strong {skills} chops) to every project.",
+    30→    30→  ],
+    31→    31→};
+    32→    32→
+    33→    33→const DOMAIN_MAP: Array<{ match: RegExp; domain: string }> = [
+    34→    34→  { match: /frontend|front-end|react|web|ui/i, domain: "modern web platforms and design systems" },
+    35→    35→  { match: /backend|back-end|api|server|node/i, domain: "scalable backend systems and APIs" },
+    36→    36→  { match: /data|ml|machine|ai|analyst|scientist/i, domain: "machine learning and large-scale analytics" },
+    37→    37→  { match: /product|manager|pm/i, domain: "product strategy and growth" },
+    38→    38→  { match: /design|ux|ui/i, domain: "user experience and interface design" },
+    39→    39→  { match: /devops|sre|cloud|infra/i, domain: "cloud infrastructure and reliability engineering" },
+    40→    40→  { match: /marketing|growth|seo/i, domain: "growth marketing and brand" },
+    41→    41→  { match: /mobile|ios|android|flutter/i, domain: "mobile application development" },
+    42→    42→];
+    43→    43→
+    44→    44→const HIGHLIGHTS = [
+    45→    45→  "reducing operational costs by up to 40%",
+    46→    46→  "leading cross-functional teams to ship 25+ features per quarter",
+    47→    47→  "improving key product metrics by 30% year-over-year",
+    48→    48→  "launching products that reached 1M+ users",
+    49→    49→  "cutting release cycles from weeks to days",
+    50→    50→  "driving revenue growth of $2M+ annually",
+    51→    51→];
+    52→    52→
+    53→    53→export interface SummaryOptions {
+    54→    54→  jobTitle: string;
+    55→    55→  years?: number;
+    56→    56→  skills: string[];
+    57→    57→  tone?: "professional" | "confident" | "friendly";
+    58→    58→}
+    59→    59→
+    60→    60→export function generateSummary(opts: SummaryOptions): string {
+    61→    61→  const tone = opts.tone ?? "professional";
+    62→    62→  const templates = SUMMARY_TEMPLATES[tone] ?? SUMMARY_TEMPLATES.professional;
+    63→    63→  const years = opts.years ?? 5;
+    64→    64→  const domain = DOMAIN_MAP.find((d) => d.match.test(opts.jobTitle))?.domain ?? "cross-functional software delivery";
+    65→    65→  const skills = (opts.skills.length ? opts.skills : ["problem solving", "collaboration", "ownership"])
+    66→    66→    .slice(0, 3)
+    67→    67→    .join(", ");
+    68→    68→  return pick(templates)
+    69→    69→    .replace("{title}", opts.jobTitle || "Software Professional")
+    70→    70→    .replace("{years}", String(years))
+    71→    71→    .replaceAll("{domain}", domain)
+    72→    72→    .replace("{skills}", skills)
+    73→    73→    .replace("{highlight}", pick(HIGHLIGHTS));
+    74→    74→}
+    75→    75→
+    76→    76→const ACTION_VERBS = [
+    77→    77→  "Spearheaded", "Engineered", "Orchestrated", "Accelerated", "Transformed",
+    78→    78→  "Championed", "Streamlined", "Delivered", "Architected", "Drove",
+    79→    79→];
+    80→    80→
+    81→    81→const METRICS = [
+    82→    82→  "improving performance by 35%",
+    83→    83→  "boosting user engagement by 28%",
+    84→    84→  "reducing costs by $150K annually",
+    85→    85→  "increasing conversion by 19%",
+    86→    86→  "cutting load times by 45%",
+    87→    87→  "saving 20+ hours per week across the team",
+    88→    88→  "achieving 99.9% reliability",
+    89→    89→  "scaling to 500K+ daily users",
+    90→    90→];
+    91→    91→
+    92→    92→const WEAK_STARTERS = ["Worked on", "Helped with", "Was responsible for", "Responsible for", "Did", "Made", "Assisted with", "Participated in", "Handled", "Took care of"];
+    93→    93→
+    94→    94→export function enhanceBullet(text: string): string {
+    95→    95→  let t = text.trim().replace(/^(i\s+|we\s+)/i, "");
+    96→    96→  const weak = WEAK_STARTERS.find((w) => t.toLowerCase().startsWith(w.toLowerCase()));
+    97→    97→  if (weak) t = t.slice(weak.length).replace(/^\s*(for|in|on|with)?\s*/i, "");
+    98→    98→  t = t.charAt(0).toLowerCase() + t.slice(1);
+    99→    99→  const verb = pick(ACTION_VERBS);
+   100→   100→  const metric = pick(METRICS);
+   101→   101→  const capitalized = t.charAt(0).toUpperCase() + t.slice(1);
+   102→   102→  const endsWithPunct = /[.!?]$/.test(t);
+   103→   103→  return `${verb} ${t}${endsWithPunct ? "" : ","} ${metric}`;
+   104→   104→}
+   105→   105→
+   106→   106→const SKILL_BANKS: Record<string, string[]> = {
+   107→   107→  frontend: ["React", "TypeScript", "Next.js", "Tailwind CSS", "Vue", "Redux", "GraphQL", "Webpack", "Jest", "Accessibility"],
+   108→   108→  backend: ["Node.js", "Python", "Go", "PostgreSQL", "Redis", "Kafka", "Docker", "Kubernetes", "gRPC", "Microservices"],
+   109→   109→  data: ["Python", "SQL", "PyTorch", "TensorFlow", "Pandas", "Spark", "Airflow", "scikit-learn", "Tableau", "dbt"],
+   110→   110→  product: ["Roadmapping", "A/B Testing", "SQL", "Figma", "Jira", "User Research", "OKRs", "Analytics", "Stakeholder Mgmt", "Agile"],
+   111→   111→  design: ["Figma", "Design Systems", "Prototyping", "User Research", "Motion Design", "Adobe CC", "Sketch", "Wireframing"],
+   112→   112→  devops: ["AWS", "Terraform", "Kubernetes", "Docker", "CI/CD", "Prometheus", "Grafana", "Linux", "Ansible", "GitOps"],
+   113→   113→  marketing: ["SEO", "Google Analytics", "Content Strategy", "HubSpot", "Email Marketing", "Paid Ads", "CRO", "Copywriting"],
+   114→   114→  mobile: ["Swift", "Kotlin", "React Native", "Flutter", "App Store Optimization", "Firebase", "MVVM"],
+   115→   115→  default: ["Leadership", "Communication", "Project Management", "Problem Solving", "Collaboration", "Data Analysis"],
+   116→   116→};
+   117→   117→
+   118→   118→export function suggestSkills(jobTitle: string): string[] {
+   119→   119→  const t = jobTitle.toLowerCase();
+   120→   120→  let bank = SKILL_BANKS.default;
+   121→   121→  if (/frontend|front-end|react|web|ui/.test(t)) bank = SKILL_BANKS.frontend;
+   122→   122→  else if (/backend|back-end|server|node|api/.test(t)) bank = SKILL_BANKS.backend;
+   123→   123→  else if (/data|ml|machine|ai|scientist/.test(t)) bank = SKILL_BANKS.data;
+   124→   124→  else if (/product|pm/.test(t)) bank = SKILL_BANKS.product;
+   125→   125→  else if (/design|ux/.test(t)) bank = SKILL_BANKS.design;
+   126→   126→  else if (/devops|sre|infra|cloud/.test(t)) bank = SKILL_BANKS.devops;
+   127→   127→  else if (/marketing|growth/.test(t)) bank = SKILL_BANKS.marketing;
+   128→   128→  else if (/mobile|ios|android|flutter/.test(t)) bank = SKILL_BANKS.mobile;
+   129→   129→  return [...bank].sort(() => Math.random() - 0.5).slice(0, 8);
+   130→   130→}
+   131→   131→
+   132→   132→/* ============================== ATS Scanner ============================== */
+   133→   133→
+   134→   134→export interface AtsIssue {
+   135→   135→  id: string;
+   136→   136→  severity: "critical" | "warning" | "good" | "info";
+   137→   137→  category: string;
+   138→   138→  title: string;
+   139→   139→  detail: string;
+   140→   140→  fix?: string;
+   141→   141→}
+   142→   142→
+   143→   143→export interface AtsBreakdownItem {
+   144→   144→  label: string;
+   145→   145→  score: number;
+   146→   146→  max: number;
+   147→   147→  hint: string;
+   148→   148→}
+   149→   149→
+   150→   150→export interface AtsResult {
+   151→   151→  score: number;
+   152→   152→  grade: "Excellent" | "Good" | "Fair" | "Needs Work";
+   153→   153→  breakdown: AtsBreakdownItem[];
+   154→   154→  issues: AtsIssue[];
+   155→   155→  matchedKeywords: string[];
+   156→   156→  missingKeywords: string[];
+   157→   157→  wordCount: number;
+   158→   158→}
+   159→   159→
+   160→   160→function resumeToText(resume: ResumeData): string {
+   161→   161→  const parts: string[] = [
+   162→   162→    resume.personal.fullName,
+   163→   163→    resume.personal.jobTitle,
+   164→   164→    resume.summary,
+   165→   165→    ...resume.skills.map((s) => s.name),
+   166→   166→  ];
+   167→   167→  for (const e of resume.experience) {
+   168→   168→    parts.push(e.role, e.company, ...e.bullets);
+   169→   169→  }
+   170→   170→  for (const e of resume.education) parts.push(e.degree, e.field, e.school);
+   171→   171→  for (const p of resume.projects) parts.push(p.name, p.description, ...p.tech);
+   172→   172→  for (const c of resume.certifications) parts.push(c.name, c.issuer);
+   173→   173→  return parts.filter(Boolean).join(" ");
+   174→   174→}
+   175→   175→
+   176→   176→const ROLE_KEYWORDS: Record<string, string[]> = {
+   177→   177→  frontend: ["React", "TypeScript", "JavaScript", "CSS", "HTML", "testing", "performance", "accessibility", "REST", "GraphQL", "Git", "responsive"],
+   178→   178→  backend: ["API", "Node", "Python", "SQL", "databases", "microservices", "Docker", "testing", "security", "scaling", "CI/CD", "Git"],
+   179→   179→  data: ["Python", "SQL", "machine learning", "statistics", "Pandas", "modeling", "A/B testing", "data pipelines", "visualization", "cloud"],
+   180→   180→  product: ["roadmap", "stakeholders", "A/B testing", "metrics", "user research", "go-to-market", "backlog", "OKR", "analytics", "strategy"],
+   181→   181→  design: ["Figma", "prototyping", "user research", "design systems", "wireframes", "usability", "accessibility", "visual design"],
+   182→   182→  default: ["leadership", "communication", "collaboration", "project management", "analytics", "agile", "stakeholders", "planning"],
+   183→   183→};
+   184→   184→
+   185→   185→function roleKeywordSet(resume: ResumeData): string[] {
+   186→   186→  const t = `${resume.personal.jobTitle} ${resume.title}`.toLowerCase();
+   187→   187→  if (/frontend|front-end|react|web|ui/.test(t)) return ROLE_KEYWORDS.frontend;
+   188→   188→  if (/backend|back-end|server|node/.test(t)) return ROLE_KEYWORDS.backend;
+   189→   189→  if (/data|ml|machine|scientist/.test(t)) return ROLE_KEYWORDS.data;
+   190→   190→  if (/product|pm/.test(t)) return ROLE_KEYWORDS.product;
+   191→   191→  if (/design|ux/.test(t)) return ROLE_KEYWORDS.design;
+   192→   192→  return ROLE_KEYWORDS.default;
+   193→   193→}
+   194→   194→
+   195→   195→function extractJobKeywords(jd: string): string[] {
+   196→   196→  const stop = new Set(["the", "and", "for", "with", "you", "our", "are", "will", "that", "this", "have", "from", "your", "work", "team", "role", "job", "who", "all", "not", "but", "can", "has", "may", "per", "using", "use", "experience", "years", "including", "ability", "strong", "plus", "etc", "new", "other", "well", "across", "within", "about", "into", "more", "than", "also", "such", "their", "them", "they", "what", "when", "where", "which", "while", "would", "should", "could", "been", "being", "were", "does", "each", "some", "most", "must", "need", "required", "requirements", "preferred", "qualifications", "responsibilities", "company", "candidate", "candidates", "looking", "join", "help", "build", "help us"]);
+   197→   197→  const words = jd.toLowerCase().match(/[a-z][a-z+#.\-]{2,}/g) ?? [];
+   198→   198→  const freq = new Map<string, number>();
+   199→   199→  for (const w of words) {
+   200→   200→    if (stop.has(w)) continue;
+   201→   201→    freq.set(w, (freq.get(w) ?? 0) + 1);
+   202→   202→  }
+   203→   203→  return [...freq.entries()]
+   204→   204→    .filter(([, c]) => c >= 2)
+   205→   205→    .sort((a, b) => b[1] - a[1])
+   206→   206→    .slice(0, 18)
+   207→   207→    .map(([w]) => w);
+   208→   208→}
+   209→   209→
+   210→   210→export function atsAnalyze(resume: ResumeData, jobDescription?: string): AtsResult {
+   211→   211→  const text = resumeToText(resume);
+   212→   212→  const lower = text.toLowerCase();
+   213→   213→  const wordCount = text.split(/\s+/).filter(Boolean).length;
+   214→   214→  const issues: AtsIssue[] = [];
+   215→   215→
+   216→   216→  /* --- Keywords (30) --- */
+   217→   217→  const targetKeywords = jobDescription && jobDescription.trim().length > 40
+   218→   218→    ? extractJobKeywords(jobDescription)
+   219→   219→    : roleKeywordSet(resume);
+   220→   220→  const matched: string[] = [];
+   221→   221→  const missing: string[] = [];
+   222→   222→  for (const kw of targetKeywords) {
+   223→   223→    if (lower.includes(kw.toLowerCase())) matched.push(kw);
+   224→   224→    else missing.push(kw);
+   225→   225→  }
+   226→   226→  const keywordScore = targetKeywords.length
+   227→   227→    ? Math.round((matched.length / targetKeywords.length) * 30)
+   228→   228→    : 18;
+   229→   229→  if (missing.length > 6) {
+   230→   230→    issues.push({
+   231→   231→      id: "kw-missing",
+   232→   232→      severity: "warning",
+   233→   233→      category: "Keywords",
+   234→   234→      title: `${missing.length} target keywords missing`,
+   235→   235→      detail: `The job description mentions terms like ${missing.slice(0, 6).join(", ")} that don't appear in your resume.`,
+   236→   236→      fix: "Weave the most relevant missing keywords naturally into your summary and experience bullets.",
+   237→   237→    });
+   238→   238→  } else {
+   239→   239→    issues.push({
+   240→   240→      id: "kw-good",
+   241→   241→      severity: "good",
+   242→   242→      category: "Keywords",
+   243→   243→      title: "Strong keyword coverage",
+   244→   244→      detail: `${matched.length} of ${targetKeywords.length} target keywords found in your resume.`,
+   245→   245→    });
+   246→   246→  }
+   247→   247→
+   248→   248→  /* --- Sections (20) --- */
+   249→   249→  const sectionChecks: Array<[boolean, string, string]> = [
+   250→   250→    [resume.summary.trim().length > 40, "Professional summary", "Add a 2–3 sentence summary at the top."],
+   251→   251→    [resume.experience.length > 0, "Work experience", "Add at least one work experience entry."],
+   252→   252→    [resume.education.length > 0, "Education", "Add your education history."],
+   253→   253→    [resume.skills.length >= 5, "Skills (5+)", "List at least 5 relevant skills."],
+   254→   254→  ];
+   255→   255→  let sectionCount = 0;
+   256→   256→  for (const [ok, label, fix] of sectionChecks) {
+   257→   257→    if (ok) sectionCount++;
+   258→   258→    else
+   259→   259→      issues.push({
+   260→   260→        id: `section-${label}`,
+   261→   261→        severity: "critical",
+   262→   262→        category: "Sections",
+   263→   263→        title: `Missing section: ${label}`,
+   264→   264→        detail: `ATS parsers expect a dedicated ${label} section.`,
+   265→   265→        fix,
+   266→   266→      });
+   267→   267→  }
+   268→   268→  const bonus = (resume.projects.length > 0 ? 1 : 0) + (resume.certifications.length > 0 ? 1 : 0);
+   269→   269→  const sectionScore = Math.min(20, sectionCount * 5 + bonus);
+   270→   270→  if (resume.projects.length === 0 && resume.certifications.length === 0) {
+   271→   271→    issues.push({
+   272→   272→      id: "section-bonus",
+   273→   273→      severity: "info",
+   274→   274→      category: "Sections",
+   275→   275→      title: "Consider adding Projects or Certifications",
+   276→   276→      detail: "These optional sections give ATS filters more context to match you against job requirements.",
+   277→   277→    });
+   278→   278→  }
+   279→   279→
+   280→   280→  /* --- Impact & content (25) --- */
+   281→   281→  const allBullets = resume.experience.flatMap((e) => e.bullets);
+   282→   282→  const quantified = allBullets.filter((b) => /\d/.test(b)).length;
+   283→   283→  const quantRatio = allBullets.length ? quantified / allBullets.length : 0;
+   284→   284→  const impactScore = Math.round(Math.min(1, quantRatio / 0.6) * 15);
+   285→   285→  const actionScore = Math.min(10, allBullets.filter((b) => /^(Led|Built|Drove|Launched|Reduced|Increased|Designed|Developed|Managed|Owned|Shipped|Improved|Created|Architected|Spearheaded|Scaled|Automated|Mentored|Delivered|Optimized)/i.test(b.trim())).length * 2);
+   286→   286→  if (quantRatio < 0.5 && allBullets.length > 0) {
+   287→   287→    issues.push({
+   288→   288→      id: "impact-quantify",
+   289→   289→      severity: "warning",
+   290→   290→      category: "Impact",
+   291→   291→      title: "Add numbers to your achievements",
+   292→   292→      detail: `Only ${Math.round(quantRatio * 100)}% of your bullet points contain measurable results. Recruiters and ATS algorithms favor quantified impact.`,
+   293→   293→      fix: 'Rewrite bullets like "Reduced page load time by 43%, cutting bounce rate 18%".',
+   294→   294→    });
+   295→   295→  } else if (allBullets.length > 0) {
+   296→   296→    issues.push({
+   297→   297→      id: "impact-good",
+   298→   298→      severity: "good",
+   299→   299→      category: "Impact",
+   300→   300→      title: "Achievements are well quantified",
+   301→   301→      detail: `${quantified} of ${allBullets.length} bullets include measurable results.`,
+   302→   302→    });
+   303→   303→  }
+   304→   304→
+   305→   305→  /* --- Formatting (15) --- */
+   306→   306→  let formatScore = 15;
+   307→   307→  const datesPresent = resume.experience.every((e) => e.startDate && (e.current || e.endDate));
+   308→   308→  if (!datesPresent) {
+   309→   309→    formatScore -= 5;
+   310→   310→    issues.push({
+   311→   311→      id: "fmt-dates",
+   312→   312→      severity: "warning",
+   313→   313→      category: "Formatting",
+   314→   314→      title: "Missing employment dates",
+   315→   315→      detail: "One or more experience entries lack start/end dates. ATS systems use dates to compute years of experience.",
+   316→   316→      fix: "Add month + year for every role, or mark it as your current position.",
+   317→   317→    });
+   318→   318→  }
+   319→   319→  const hasBullets = resume.experience.some((e) => e.bullets.length > 0);
+   320→   320→  if (!hasBullets) {
+   321→   321→    formatScore -= 5;
+   322→   322→    issues.push({
+   323→   323→      id: "fmt-bullets",
+   324→   324→      severity: "warning",
+   325→   325→      category: "Formatting",
+   326→   326→      title: "No bullet points detected",
+   327→   327→      detail: "Bulleted achievements are easier for ATS to parse than paragraphs.",
+   328→   328→      fix: "Break each role into 3–5 achievement bullets.",
+   329→   329→    });
+   330→   330→  }
+   331→   331→  if (resume.personal.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resume.personal.email)) {
+   332→   332→    formatScore -= 3;
+   333→   333→    issues.push({
+   334→   334→      id: "fmt-email",
+   335→   335→      severity: "critical",
+   336→   336→      category: "Formatting",
+   337→   337→      title: "Invalid email format",
+   338→   338→      detail: `"${resume.personal.email}" doesn't look like a valid email — ATS contact parsers may fail.`,
+   339→   339→      fix: "Use the format name@domain.com.",
+   340→   340→    });
+   341→   341→  }
+   342→   342→  if (!resume.personal.phone && !resume.personal.email) {
+   343→   343→    formatScore -= 4;
+   344→   344→    issues.push({
+   345→   345→      id: "fmt-contact",
+   346→   346→      severity: "critical",
+   347→   347→      category: "Formatting",
+   348→   348→      title: "No contact information",
+   349→   349→      detail: "Add at least an email address and phone number so recruiters can reach you.",
+   350→   350→    });
+   351→   351→  }
+   352→   352→  if (formatScore === 15) {
+   353→   353→    issues.push({
+   354→   354→      id: "fmt-good",
+   355→   355→      severity: "good",
+   356→   356→      category: "Formatting",
+   357→   357→      title: "Clean, parseable formatting",
+   358→   358→      detail: "Dates, bullets, and contact details are all present and correctly formatted.",
+   359→   359→    });
+   360→   360→  }
+   361→   361→
+   362→   362→  /* --- Length (10) --- */
+   363→   363→  let lengthScore: number;
+   364→   364→  if (wordCount < 250) {
+   365→   365→    lengthScore = 4;
+   366→   366→    issues.push({
+   367→   367→      id: "len-short",
+   368→   368→      severity: "warning",
+   369→   369→      category: "Length",
+   370→   370→      title: "Resume is too short",
+   371→   371→      detail: `${wordCount} words. Aim for 400–800 words to give ATS enough context.`,
+   372→   372→    });
+   373→   373→  } else if (wordCount > 900) {
+   374→   374→    lengthScore = 6;
+   375→   375→    issues.push({
+   376→   376→      id: "len-long",
+   377→   377→      severity: "info",
+   378→   378→      category: "Length",
+   379→   379→      title: "Resume is quite long",
+   380→   380→      detail: `${wordCount} words. Trim older or less relevant roles to stay under ~800 words.`,
+   381→   381→    });
+   382→   382→  } else {
+   383→   383→    lengthScore = 10;
+   384→   384→    issues.push({
+   385→   385→      id: "len-good",
+   386→   386→      severity: "good",
+   387→   387→      category: "Length",
+   388→   388→      title: "Ideal resume length",
+   389→   389→      detail: `${wordCount} words hits the 400–800 sweet spot for ATS readability.`,
+   390→   390→    });
+   391→   391→  }
+   392→   392→
+   393→   393→  const score = Math.max(0, Math.min(100, keywordScore + sectionScore + impactScore + actionScore + Math.max(0, formatScore) + lengthScore));
+   394→   394→  const grade = score >= 85 ? "Excellent" : score >= 70 ? "Good" : score >= 50 ? "Fair" : "Needs Work";
+   395→   395→
+   396→   396→  return {
+   397→   397→    score,
+   398→   398→    grade,
+   399→   399→    breakdown: [
+   400→   400→      { label: "Keywords", score: keywordScore, max: 30, hint: "Match against target role keywords" },
+   401→   401→      { label: "Sections", score: sectionScore, max: 20, hint: "Standard sections present" },
+   402→   402→      { label: "Impact", score: impactScore + actionScore, max: 25, hint: "Quantified, action-driven content" },
+   403→   403→      { label: "Formatting", score: Math.max(0, formatScore), max: 15, hint: "Dates, bullets, contact info" },
+   404→   404→      { label: "Length", score: lengthScore, max: 10, hint: "Word count in the sweet spot" },
+   405→   405→    ],
+   406→   406→    issues: issues.sort((a, b) => {
+   407→   407→      const order = { critical: 0, warning: 1, info: 2, good: 3 };
+   408→   408→      return order[a.severity] - order[b.severity];
+   409→   409→    }),
+   410→   410→    matchedKeywords: matched.slice(0, 12),
+   411→   411→    missingKeywords: missing.slice(0, 12),
+   412→   412→    wordCount,
+   413→   413→  };
+   414→   414→}
+   415→   415→
+   416→   416→/* ============================== Grammar Checker ============================== */
+   417→   417→
+   418→   418→export interface GrammarIssue {
+   419→   419→  id: string;
+   420→   420→  type: "spelling" | "grammar" | "style" | "punctuation" | "weak-phrase";
+   421→   421→  original: string;
+   422→   422→  suggestion: string;
+   423→   423→  message: string;
+   424→   424→}
+   425→   425→
+   426→   426→export interface GrammarResult {
+   427→   427→  score: number;
+   428→   428→  wordCount: number;
+   429→   429→  sentenceCount: number;
+   430→   430→  issues: GrammarIssue[];
+   431→   431→  stats: { label: string; value: string }[];
+   432→   432→}
+   433→   433→
+   434→   434→const MISSPELLINGS: Record<string, string> = {
+   435→   435→  recieve: "receive", seperate: "separate", teh: "the", definately: "definitely",
+   436→   436→  occured: "occurred", acheive: "achieve", responsable: "responsible",
+   437→   437→  managment: "management", sucessful: "successful", adviced: "advised",
+   438→   438→  independant: "independent", enviroment: "environment", developement: "development",
+   439→   439→  commited: "committed", excellant: "excellent", experiance: "experience",
+   440→   440→  knowlege: "knowledge", maintance: "maintenance", neccessary: "necessary",
+   441→   441→  occassion: "occasion", posession: "possession", proffesional: "professional",
+   442→   442→  recomend: "recommend", succesful: "successful", truely: "truly",
+   443→   443→  untill: "until", wich: "which", wierd: "weird", leadeship: "leadership",
+   444→   444→  buisness: "business", colaboration: "collaboration", acheivment: "achievement",
+   445→   445→};
+   446→   446→
+   447→   447→const WEAK_PHRASES: Array<{ phrase: RegExp; suggestion: string; why: string }> = [
+   448→   448→  { phrase: /\bresponsible for\b/gi, suggestion: "Owned / Led", why: "Weak opener — lead with a strong action verb instead" },
+   449→   449→  { phrase: /\bworked on\b/gi, suggestion: "Developed / Built / Delivered", why: "Vague verb — describe what you actually did" },
+   450→   450→  { phrase: /\bhelped (with|to)?\b/gi, suggestion: "Supported / Contributed to", why: "Understates your contribution" },
+   451→   451→  { phrase: /\bduties included\b/gi, suggestion: "Drove / Managed", why: "Task-focused; reframe as achievements" },
+   452→   452→  { phrase: /\bteam player\b/gi, suggestion: "Collaborated cross-functionally", why: "Cliché — show collaboration through results" },
+   453→   453→  { phrase: /\bhard working\b|\bhard-working\b/gi, suggestion: "Results-driven", why: "Cliché — quantify your output instead" },
+   454→   454→  { phrase: /\bvery\s+(\w+)/gi, suggestion: "stronger adjective", why: "'Very' weakens the word that follows" },
+   455→   455→  { phrase: /\breally\s+(\w+)/gi, suggestion: "stronger adjective", why: "'Really' is filler — cut it" },
+   456→   456→  { phrase: /\bjust\b/gi, suggestion: "(remove)", why: "Filler word that minimizes your impact" },
+   457→   457→  { phrase: /\bin order to\b/gi, suggestion: "to", why: "Wordy — 'to' means the same thing" },
+   458→   458→];
+   459→   459→
+   460→   460→const PASSIVE_RE = /\b(was|were|been|being)\s+\w+(ed|en)\b/gi;
+   461→   461→
+   462→   462→export function grammarCheckText(text: string): GrammarResult {
+   463→   463→  const issues: GrammarIssue[] = [];
+   464→   464→  const wordCount = text.split(/\s+/).filter(Boolean).length;
+   465→   465→  const sentenceCount = (text.match(/[.!?]+(\s|$)/g) ?? []).length || 1;
+   466→   466→
+   467→   467→  /* spelling */
+   468→   468→  const words = text.match(/[A-Za-z][A-Za-z']*/g) ?? [];
+   469→   469→  const seen = new Set<string>();
+   470→   470→  for (const w of words) {
+   471→   471→    const lw = w.toLowerCase();
+   472→   472→    if (MISSPELLINGS[lw] && !seen.has(lw)) {
+   473→   473→      seen.add(lw);
+   474→   474→      issues.push({
+   475→   475→        id: `sp-${lw}`,
+   476→   476→        type: "spelling",
+   477→   477→        original: w,
+   478→   478→        suggestion: MISSPELLINGS[lw],
+   479→   479→        message: `Possible misspelling — did you mean "${MISSPELLINGS[lw]}"?`,
+   480→   480→      });
+   481→   481→    }
+   482→   482→  }
+   483→   483→
+   484→   484→  /* lowercase standalone i */
+   485→   485→  const loneI = text.match(/(^|\s)i(\s|,|'|\.)/g);
+   486→   486→  if (loneI) {
+   487→   487→    issues.push({
+   488→   488→      id: "gr-lower-i",
+   489→   489→      type: "grammar",
+   490→   490→      original: "i",
+   491→   491→      suggestion: "I",
+   492→   492→      message: 'The pronoun "I" should always be capitalized.',
+   493→   493→    });
+   494→   494→  }
+   495→   495→
+   496→   496→  /* double spaces */
+   497→   497→  if (/ {2,}/.test(text)) {
+   498→   498→    issues.push({
+   499→   499→      id: "pu-double-space",
+   500→   500→      type: "punctuation",
+   501→   501→      original: "double spaces",
+   502→   502→      suggestion: "single space",
+   503→   503→      message: "Multiple consecutive spaces found — use a single space.",
+   504→   504→    });
+   505→   505→  }
+   506→   506→
+   507→   507→  /* repeated words */
+   508→   508→  const repeated = text.match(/\b(\w+)\s+\1\b/gi);
+   509→   509→  if (repeated) {
+   510→   510→    for (const r of repeated.slice(0, 3)) {
+   511→   511→      const w = r.trim().split(/\s+/)[0];
+   512→   512→      if (w.length > 1) {
+   513→   513→        issues.push({
+   514→   514→          id: `gr-repeat-${w}`,
+   515→   515→          type: "grammar",
+   516→   516→          original: r.trim(),
+   517→   517→          suggestion: w,
+   518→   518→          message: `"${w}" is repeated — remove the duplicate.`,
+   519→   519→        });
+   520→   520→      }
+   521→   521→    }
+   522→   522→  }
+   523→   523→
+   524→   524→  /* passive voice */
+   525→   525→  const passives = text.match(PASSIVE_RE) ?? [];
+   526→   526→  if (passives.length > 0) {
+   527→   527→    issues.push({
+   528→   528→      id: "st-passive",
+   529→   529→      type: "style",
+   530→   530→      original: passives[0],
+   531→   531→      suggestion: "active voice",
+   532→   532→      message: `${passives.length} passive construction${passives.length > 1 ? "s" : ""} found. Active voice is stronger: "Led the migration" vs "The migration was led".`,
+   533→   533→    });
+   534→   534→  }
+   535→   535→
+   536→   536→  /* weak phrases */
+   537→   537→  for (const { phrase, suggestion, why } of WEAK_PHRASES) {
+   538→   538→    const m = text.match(phrase);
+   539→   539→    if (m) {
+   540→   540→      issues.push({
+   541→   541→        id: `wk-${suggestion.replace(/\W/g, "")}`,
+   542→   542→        type: "weak-phrase",
+   543→   543→        original: m[0],
+   544→   544→        suggestion,
+   545→   545→        message: why,
+   546→   546→      });
+   547→   547→    }
+   548→   548→  }
+   549→   549→
+   550→   550→  /* missing capitalization at sentence start */
+   551→   551→  const sentences = text.split(/[.!?]\s+/).filter((s) => s.trim().length > 3);
+   552→   552→  const lowerStarts = sentences.filter((s) => /^[a-z]/.test(s.trim())).length;
+   553→   553→  if (lowerStarts > 0) {
+   554→   554→    issues.push({
+   555→   555→      id: "pu-sentence-case",
+   556→   556→      type: "punctuation",
+   557→   557→      original: "sentence start",
+   558→   558→      suggestion: "Capital letter",
+   559→   559→      message: `${lowerStarts} sentence${lowerStarts > 1 ? "s start" : " starts"} with a lowercase letter.`,
+   560→   560→    });
+   561→   561→  }
+   562→   562→
+   563→   563→  const score = Math.max(40, Math.min(100, 100 - issues.length * 7 - (passives.length > 2 ? 5 : 0)));
+   564→   564→
+   565→   565→  const avgWords = Math.round(wordCount / sentenceCount);
+   566→   566→  return {
+   567→   567→    score,
+   568→   568→    wordCount,
+   569→   569→    sentenceCount,
+   570→   570→    issues,
+   571→   571→    stats: [
+   572→   572→      { label: "Words", value: String(wordCount) },
+   573→   573→      { label: "Sentences", value: String(sentenceCount) },
+   574→   574→      { label: "Avg. words / sentence", value: String(avgWords) },
+   575→   575→      { label: "Readability", value: avgWords > 25 ? "Complex" : avgWords > 18 ? "Moderate" : "Easy to read" },
+   576→   576→    ],
+   577→   577→  };
+   578→   578→}
+   579→   579→
+   580→   580→/* ============================== Cover Letter ============================== */
+   581→   581→
+   582→   582→const COVER_OPENERS: Record<string, string> = {
+   583→   583→  professional: "I am writing to express my strong interest in the {role} position at {company}. With a proven track record of {highlight}, I am confident I would make an immediate contribution to your team.",
+   584→   584→  enthusiastic: "When I saw the {role} opening at {company}, I couldn't click \"Apply\" fast enough. {company}'s reputation for {companyTrait} is exactly the environment where I've done my best work — {highlight}.",
+   585→   585→  concise: "I'm excited to apply for the {role} role at {company}. Short version: I've spent my career {highlight}, and I'd love to bring that energy to {company}.",
+   586→   586→  creative: "Every great team needs a {role} who treats goals like puzzles — and every puzzle I've met lately, I've solved by {highlight}. That's why the {role} opening at {company} caught my attention.",
+   587→   587→};
+   588→   588→
+   589→   589→const COVER_CLOSERS: Record<string, string> = {
+   590→   590→  professional: "I would welcome the opportunity to discuss how my experience aligns with {company}'s goals. Thank you for your time and consideration.",
+   591→   591→  enthusiastic: "I'd love to tell you more about how I can help {company} win. Thank you for considering my application — I hope to hear from you soon!",
+   592→   592→  concise: "I'd welcome a conversation about how I can contribute at {company}. Thank you for your time.",
+   593→   593→  creative: "Let's find 15 minutes to talk about what we could build together at {company}. Thank you for reading!",
+   594→   594→};
+   595→   595→
+   596→   596→const COMPANY_TRAITS = [
+   597→   597→  "innovation and customer obsession", "building products people love",
+   598→   598→  "moving fast without breaking trust", "world-class engineering culture",
+   599→   599→];
+   600→   600→
+   601→   601→export type CoverTone = "professional" | "enthusiastic" | "concise" | "creative";
+   602→   602→
+   603→   603→export function generateCoverLetter(opts: {
+   604→   604→  resume: ResumeData;
+   605→   605→  company: string;
+   606→   606→  role: string;
+   607→   607→  tone: CoverTone;
+   608→   608→}): string {
+   609→   609→  const { resume, company, role, tone } = opts;
+   610→   610→  const name = resume.personal.fullName || "Your Name";
+   611→   611→  const jobTitle = resume.personal.jobTitle || role;
+   612→   612→  const topSkills = resume.skills.slice(0, 3).map((s) => s.name).join(", ") || "problem solving";
+   613→   613→  const recent = resume.experience[0];
+   614→   614→  const highlight = recent?.bullets[0]
+   615→   615→    ? recent.bullets[0].replace(/^[A-Z]/, (c) => c.toLowerCase()).replace(/\.$/, "")
+   616→   616→    : "delivering measurable results in fast-paced teams";
+   617→   617→  const companyTrait = pick(COMPANY_TRAITS);
+   618→   618→  const years = Math.max(2, resume.experience.length * 3);
+   619→   619→
+   620→   620→  const opener = (COVER_OPENERS[tone] ?? COVER_OPENERS.professional)
+   621→   621→    .replaceAll("{role}", role)
+   622→   622→    .replaceAll("{company}", company)
+   623→   623→    .replace("{highlight}", highlight)
+   624→   624→    .replace("{companyTrait}", companyTrait);
+   625→   625→
+   626→   626→  const body1 = `In my ${years > 2 ? `${years} years` : "time"} as a ${jobTitle}, I have consistently ${highlight}. My core toolkit — ${topSkills} — maps directly to what your team is building${company ? ` at ${company}` : ""}.`;
+   627→   627→
+   628→   628→  const body2 = recent
+   629→   629→    ? `Most recently at ${recent.company}, I ${
+   630→   630→        recent.bullets[1]
+   631→   631→          ? recent.bullets[1].replace(/^[A-Z]/, (c) => c.toLowerCase()).replace(/\.$/, "")
+   632→   632→          : "partnered with product and engineering to ship high-impact work"
+   633→   633→      }. These experiences taught me how to balance craft with deadlines — and how to bring stakeholders along for the ride.`
+   634→   634→    : `Throughout my career I have partnered closely with product and engineering teams to ship high-impact work, and I bring that same ownership mentality to every challenge.`;
+   635→   635→
+   636→   636→  const closer = (COVER_CLOSERS[tone] ?? COVER_CLOSERS.professional).replaceAll("{company}", company);
+   637→   637→
+   638→   638→  return `${name}
+   639→   639→${resume.personal.email || "email@example.com"}${resume.personal.phone ? ` · ${resume.personal.phone}` : ""}
+   640→   640→
+   641→   641→Dear Hiring Team,
+   642→   642→
+   643→   643→${opener}
+   644→   644→
+   645→   645→${body1}
+   646→   646→
+   647→   647→${body2}
+   648→   648→
+   649→   649→${closer}
+   650→   650→
+   651→   651→Sincerely,
+   652→   652→${name}`;
+   653→   653→}
+   654→   654→
+   655→   655→/* ============================== LinkedIn Import ============================== */
+   656→   656→
+   657→   657→export interface LinkedInParsed {
+   658→   658→  name: string;
+   659→   659→  headline: string;
+   660→   660→  location: string;
+   661→   661→  summary: string;
+   662→   662→  experience: Array<{ company: string; role: string; period: string; bullets: string[] }>;
+   663→   663→  education: Array<{ school: string; degree: string; period: string }>;
+   664→   664→  skills: string[];
+   665→   665→  confidence: number;
+   666→   666→}
+   667→   667→
+   668→   668→export function parseLinkedInProfile(text: string): LinkedInParsed {
+   669→   669→  const lines = text
+   670→   670→    .split("\n")
+   671→   671→    .map((l) => l.trim())
+   672→   672→    .filter(Boolean);
+   673→   673→
+   674→   674→  const result: LinkedInParsed = {
+   675→   675→    name: "", headline: "", location: "", summary: "",
+   676→   676→    experience: [], education: [], skills: [], confidence: 0,
+   677→   677→  };
+   678→   678→
+   679→   679→  let section = "header";
+   680→   680→  let currentExp: LinkedInParsed["experience"][number] | null = null;
+   681→   681→  const lowerSections = new Set(["experience", "education", "skills", "about", "summary", "licenses & certifications"]);
+   682→   682→
+   683→   683→  for (const line of lines) {
+   684→   684→    const l = line.toLowerCase().replace(/:$/, "").trim();
+   685→   685→    if (lowerSections.has(l)) {
+   686→   686→      section = l === "summary" ? "about" : l;
+   687→   687→      continue;
+   688→   688→    }
+   689→   689→    if (section === "header") {
+   690→   690→      if (!result.name) result.name = line;
+   691→   691→      else if (!result.headline) result.headline = line;
+   692→   692→      else if (!result.location && /^(greater |)[A-Z]/.test(line) && line.split(",").length >= 2) result.location = line;
+   693→   693→    } else if (section === "about") {
+   694→   694→      result.summary += (result.summary ? " " : "") + line;
+   695→   695→    } else if (section === "experience") {
+   696→   696→      const atMatch = line.match(/^(.{2,60}?)\s+at\s+(.+)$/i);
+   697→   697→      const dateMatch = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|[A-Za-z]+ \d{4}).*\d{4}/i.test(line) || /^\d{4}\s*[-–]\s*/.test(line);
+   698→   698→      if (atMatch) {
+   699→   699→        if (currentExp) result.experience.push(currentExp);
+   700→   700→        currentExp = { role: atMatch[1], company: atMatch[2], period: "", bullets: [] };
+   701→   701→      } else if (dateMatch && currentExp) {
+   702→   702→        currentExp.period = line;
+   703→   703→      } else if (currentExp && (line.startsWith("•") || line.startsWith("-") || line.startsWith("· ") || line.length > 40)) {
+   704→   704→        currentExp.bullets.push(line.replace(/^[•\-·]\s*/, ""));
+   705→   705→      }
+   706→   706→    } else if (section === "education") {
+   707→   707→      const m = line.match(/^(.+?),\s*(B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?B\.?A\.?|Ph\.?D\.?|Bachelor|Master|Doctor)/i);
+   708→   708→      if (m) result.education.push({ school: m[1], degree: m[2], period: "" });
+   709→   709→      else if (result.education.length && !result.education[result.education.length - 1].period && /\d{4}/.test(line)) {
+   710→   710→        result.education[result.education.length - 1].period = line;
+   711→   711→      }
+   712→   712→    } else if (section === "skills") {
+   713→   713→      for (const s of line.split(/[,•·|]/)) {
+   714→   714→        const t = s.trim();
+   715→   715→        if (t && t.length < 40 && !result.skills.includes(t)) result.skills.push(t);
+   716→   716→      }
+   717→   717→    }
+   718→   718→  }
+   719→   719→  if (currentExp) result.experience.push(currentExp);
+   720→   720→
+   721→   721→  let filled = 0;
+   722→   722→  const checks = [result.name, result.headline, result.summary, result.experience.length, result.education.length, result.skills.length];
+   723→   723→  for (const c of checks) if (c) filled++;
+   724→   724→  result.confidence = Math.round((filled / checks.length) * 100);
+   725→   725→  return result;
+   726→   726→}
+   727→   727→

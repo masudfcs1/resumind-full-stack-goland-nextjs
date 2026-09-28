@@ -1,0 +1,744 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import Link from "next/link";
+     5→import { motion, type Variants } from "framer-motion";
+     6→import { formatDistanceToNow } from "date-fns";
+     7→import {
+     8→  AlignLeft,
+     9→  ArrowRight,
+    10→  Briefcase,
+    11→  Building2,
+    12→  Copy,
+    13→  Crosshair,
+    14→  Download,
+    15→  Loader2,
+    16→  Mail,
+    17→  Palette,
+    18→  Plus,
+    19→  RefreshCw,
+    20→  Save,
+    21→  SkipForward,
+    22→  Sparkles,
+    23→  X,
+    24→  Zap,
+    25→  type LucideIcon,
+    26→} from "lucide-react";
+    27→import { toast } from "sonner";
+    28→
+    29→import { Badge } from "@/components/ui/badge";
+    30→import { Button } from "@/components/ui/button";
+    31→import { Card, CardContent } from "@/components/ui/card";
+    32→import { Input } from "@/components/ui/input";
+    33→import { Label } from "@/components/ui/label";
+    34→import {
+    35→  Select,
+    36→  SelectContent,
+    37→  SelectItem,
+    38→  SelectTrigger,
+    39→  SelectValue,
+    40→} from "@/components/ui/select";
+    41→import { useActiveResume, useResumeStore } from "@/lib/resume-store";
+    42→import {
+    43→  generateCoverLetter,
+    44→  generateTailoredCoverLetter,
+    45→  sleep,
+    46→  type CoverTone,
+    47→} from "@/lib/mock-ai";
+    48→import { useMounted } from "@/lib/use-mounted";
+    49→import { cn } from "@/lib/utils";
+    50→
+    51→import { gradeBadgeClass } from "@/components/tools/score-gauge";
+    52→import { ResumeSelect } from "@/components/tools/resume-select";
+    53→import { ToolPageHeader } from "@/components/tools/tool-page-header";
+    54→import {
+    55→  EASE,
+    56→  fadeInScale,
+    57→  staggerContainer,
+    58→  staggerItem,
+    59→} from "@/components/tools/variants";
+    60→import { loadMatchHistory, type MatchHistoryEntry } from "@/components/match/history";
+    61→import { keywordLabel } from "@/components/match/suggest";
+    62→
+    63→/* ============================== Meta ============================== */
+    64→
+    65→const TONES: Array<{
+    66→  value: CoverTone;
+    67→  label: string;
+    68→  icon: LucideIcon;
+    69→  hint: string;
+    70→}> = [
+    71→  { value: "professional", label: "Professional", icon: Briefcase, hint: "Classic and polished" },
+    72→  { value: "enthusiastic", label: "Enthusiastic", icon: Zap, hint: "Energetic and eager" },
+    73→  { value: "concise", label: "Concise", icon: AlignLeft, hint: "Short and direct" },
+    74→  { value: "creative", label: "Creative", icon: Palette, hint: "Bold and memorable" },
+    75→];
+    76→
+    77→type HeaderStyle = "classic" | "modern" | "minimal";
+    78→
+    79→const HEADER_STYLES: Array<{ value: HeaderStyle; label: string; blurb: string }> = [
+    80→  { value: "classic", label: "Classic", blurb: "Centered letterhead" },
+    81→  { value: "modern", label: "Modern", blurb: "Accent bar, bold" },
+    82→  { value: "minimal", label: "Minimal", blurb: "Quiet, airy" },
+    83→];
+    84→
+    85→/** Keyword chip: pops in with a slight scale so the row feels alive. */
+    86→const chipItem: Variants = {
+    87→  hidden: { opacity: 0, scale: 0.7, y: 6 },
+    88→  show: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.35, ease: EASE } },
+    89→};
+    90→
+    91→/* ============================== Page ============================== */
+    92→
+    93→export default function CoverLetterPage() {
+    94→  const mounted = useMounted();
+    95→  const resumes = useResumeStore((s) => s.resumes);
+    96→  const activeResume = useActiveResume();
+    97→  const activeResumeId = useResumeStore((s) => s.activeResumeId);
+    98→  const setActive = useResumeStore((s) => s.setActive);
+    99→  const incrementCoverLetters = useResumeStore((s) => s.incrementCoverLetters);
+   100→
+   101→  const resume = resumes.find((r) => r.id === activeResumeId) ?? activeResume;
+   102→
+   103→  const [company, setCompany] = React.useState("");
+   104→  const [role, setRole] = React.useState("");
+   105→  const [roleTouched, setRoleTouched] = React.useState(false);
+   106→  const [tone, setTone] = React.useState<CoverTone>("professional");
+   107→  const [headerStyle, setHeaderStyle] = React.useState<HeaderStyle>("modern");
+   108→  const [generating, setGenerating] = React.useState(false);
+   109→  const [letter, setLetter] = React.useState<string | null>(null);
+   110→  const [typedLen, setTypedLen] = React.useState(0);
+   111→  const [history, setHistory] = React.useState<MatchHistoryEntry[]>([]);
+   112→  const [selectedJdId, setSelectedJdId] = React.useState<string | null>(null);
+   113→  const [injected, setInjected] = React.useState<string[]>([]);
+   114→  const [genKey, setGenKey] = React.useState(0);
+   115→
+   116→  /* Prefill role from the active resume once hydrated (unless user edited). */
+   117→  React.useEffect(() => {
+   118→    if (!mounted || roleTouched) return;
+   119→    if (activeResume?.personal.jobTitle) setRole(activeResume.personal.jobTitle);
+   120→  }, [mounted, activeResume, roleTouched]);
+   121→
+   122→  /* Load Job Match scans once hydrated (localStorage — never during SSR). */
+   123→  React.useEffect(() => {
+   124→    if (!mounted) return;
+   125→    setHistory(loadMatchHistory());
+   126→  }, [mounted]);
+   127→
+   128→  /* Keep only scans made with the currently selected resume. */
+   129→  const jdEntries = React.useMemo(
+   130→    () => history.filter((h) => h.resumeId === activeResumeId),
+   131→    [history, activeResumeId]
+   132→  );
+   133→  const selectedJd = jdEntries.find((h) => h.id === selectedJdId) ?? null;
+   134→
+   135→  /* A selected scan belongs to one resume — drop the pick when it changes. */
+   136→  React.useEffect(() => {
+   137→    setSelectedJdId(null);
+   138→  }, [activeResumeId]);
+   139→
+   140→  /* Typewriter reveal: slice the generated letter at ~12ms per character. */
+   141→  React.useEffect(() => {
+   142→    if (letter === null) {
+   143→      setTypedLen(0);
+   144→      return;
+   145→    }
+   146→    setTypedLen(0);
+   147→    const id = window.setInterval(() => {
+   148→      setTypedLen((n) => {
+   149→        if (n >= letter.length) {
+   150→          window.clearInterval(id);
+   151→          return n;
+   152→        }
+   153→        return Math.min(n + 2, letter.length);
+   154→      });
+   155→    }, 12);
+   156→    return () => window.clearInterval(id);
+   157→  }, [letter]);
+   158→
+   159→  const typing = letter !== null && typedLen < letter.length;
+   160→  const typed = letter === null ? "" : letter.slice(0, typedLen);
+   161→
+   162→  const buildLetter = React.useCallback(
+   163→    (): { text: string; injected: string[] } | null => {
+   164→      if (!resume) return null;
+   165→      const baseOpts = {
+   166→        resume,
+   167→        company: company.trim() || "your team",
+   168→        role: role.trim() || resume.personal.jobTitle || "the open role",
+   169→        tone,
+   170→      };
+   171→      if (selectedJd) {
+   172→        const tailored = generateTailoredCoverLetter({
+   173→          ...baseOpts,
+   174→          jd: selectedJd.jd,
+   175→        });
+   176→        return { text: tailored.text, injected: tailored.injectedKeywords };
+   177→      }
+   178→      return { text: generateCoverLetter(baseOpts), injected: [] };
+   179→    },
+   180→    [resume, company, role, tone, selectedJd]
+   181→  );
+   182→
+   183→  const handleGenerate = async () => {
+   184→    if (generating || !resume) return;
+   185→    setGenerating(true);
+   186→    setLetter(null);
+   187→    try {
+   188→      await sleep(1400);
+   189→      const result = buildLetter();
+   190→      if (result) {
+   191→        setLetter(result.text);
+   192→        setInjected(result.injected);
+   193→        setGenKey((k) => k + 1);
+   194→        toast.success(
+   195→          result.injected.length > 0
+   196→            ? `Tailored with ${result.injected.length} keyword${result.injected.length === 1 ? "" : "s"}`
+   197→            : "Cover letter drafted"
+   198→        );
+   199→      }
+   200→    } catch {
+   201→      toast.error("Generation failed — please try again.");
+   202→    } finally {
+   203→      setGenerating(false);
+   204→    }
+   205→  };
+   206→
+   207→  const handleRegenerate = async () => {
+   208→    if (generating || !resume) return;
+   209→    setGenerating(true);
+   210→    try {
+   211→      await sleep(600);
+   212→      const result = buildLetter();
+   213→      if (result) {
+   214→        setLetter(result.text);
+   215→        setInjected(result.injected);
+   216→        setGenKey((k) => k + 1);
+   217→      }
+   218→    } finally {
+   219→      setGenerating(false);
+   220→    }
+   221→  };
+   222→
+   223→  const handleClearJd = () => setSelectedJdId(null);
+   224→
+   225→  const handleCopy = async () => {
+   226→    if (!letter) return;
+   227→    try {
+   228→      await navigator.clipboard.writeText(letter);
+   229→      toast.success("Copied to clipboard");
+   230→    } catch {
+   231→      toast.error("Couldn't access the clipboard — select and copy manually");
+   232→    }
+   233→  };
+   234→
+   235→  const handleDownload = () => {
+   236→    if (!letter) return;
+   237→    const blob = new Blob([letter], { type: "text/plain;charset=utf-8" });
+   238→    const url = URL.createObjectURL(blob);
+   239→    const a = document.createElement("a");
+   240→    a.href = url;
+   241→    const slug =
+   242→      company
+   243→        .trim()
+   244→        .toLowerCase()
+   245→        .replace(/[^a-z0-9]+/g, "-")
+   246→        .replace(/(^-|-$)/g, "") || "draft";
+   247→    a.download = `cover-letter-${slug}.txt`;
+   248→    document.body.appendChild(a);
+   249→    a.click();
+   250→    a.remove();
+   251→    URL.revokeObjectURL(url);
+   252→    toast.success("Cover letter downloaded");
+   253→  };
+   254→
+   255→  const handleSave = () => {
+   256→    incrementCoverLetters();
+   257→    toast.success("Saved to dashboard");
+   258→  };
+   259→
+   260→  const handleSkip = () => {
+   261→    if (letter !== null) setTypedLen(letter.length);
+   262→  };
+   263→
+   264→  /* Split the letter into letterhead + body for styled rendering. */
+   265→  const lines = typed.split("\n");
+   266→  const headerLines = lines.slice(0, 2);
+   267→  const bodyText = lines.slice(2).join("\n");
+   268→
+   269→  return (
+   270→    <motion.div
+   271→      variants={staggerContainer}
+   272→      initial="hidden"
+   273→      animate="show"
+   274→      className="mx-auto w-full max-w-6xl space-y-6"
+   275→    >
+   276→      <ToolPageHeader
+   277→        icon={Mail}
+   278→        title="Cover Letter Generator"
+   279→        description="Turn your resume into a tailored, hiring-manager-ready cover letter. Pick a tone, choose a letterhead, and ship it in seconds."
+   280→      />
+   281→
+   282→      {/* Config */}
+   283→      <motion.section variants={staggerItem} aria-label="Cover letter configuration">
+   284→        <Card>
+   285→          <CardContent className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
+   286→            <div className="space-y-1.5">
+   287→              <Label htmlFor="cl-company">Company</Label>
+   288→              <div className="relative">
+   289→                <Building2
+   290→                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+   291→                  aria-hidden="true"
+   292→                />
+   293→                <Input
+   294→                  id="cl-company"
+   295→                  value={company}
+   296→                  onChange={(e) => setCompany(e.target.value)}
+   297→                  placeholder="e.g. Lumen Labs"
+   298→                  className="pl-9"
+   299→                  autoComplete="off"
+   300→                />
+   301→              </div>
+   302→            </div>
+   303→            <div className="space-y-1.5">
+   304→              <Label htmlFor="cl-role">Role</Label>
+   305→              <Input
+   306→                id="cl-role"
+   307→                value={role}
+   308→                onChange={(e) => {
+   309→                  setRole(e.target.value);
+   310→                  setRoleTouched(true);
+   311→                }}
+   312→                placeholder="e.g. Senior Frontend Engineer"
+   313→                autoComplete="off"
+   314→              />
+   315→            </div>
+   316→            <div className="space-y-1.5">
+   317→              <Label htmlFor="cl-tone">Tone</Label>
+   318→              <Select value={tone} onValueChange={(v) => setTone(v as CoverTone)}>
+   319→                <SelectTrigger id="cl-tone" aria-label="Letter tone">
+   320→                  <SelectValue />
+   321→                </SelectTrigger>
+   322→                <SelectContent>
+   323→                  {TONES.map((t) => (
+   324→                    <SelectItem key={t.value} value={t.value}>
+   325→                      <span className="flex items-center gap-2">
+   326→                        <t.icon className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+   327→                        {t.label}
+   328→                        <span className="text-xs text-muted-foreground">— {t.hint}</span>
+   329→                      </span>
+   330→                    </SelectItem>
+   331→                  ))}
+   332→                </SelectContent>
+   333→              </Select>
+   334→            </div>
+   335→            <div className="space-y-1.5">
+   336→              <Label>Resume</Label>
+   337→              <ResumeSelect
+   338→                value={resume?.id ?? ""}
+   339→                onValueChange={setActive}
+   340→                ariaLabel="Resume to base the letter on"
+   341→              />
+   342→            </div>
+   343→
+   344→            {/* Letterhead style picker */}
+   345→            <div className="space-y-2 sm:col-span-2">
+   346→              <Label>Letterhead style</Label>
+   347→              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Letterhead style">
+   348→                {HEADER_STYLES.map((s) => {
+   349→                  const active = headerStyle === s.value;
+   350→                  return (
+   351→                    <button
+   352→                      key={s.value}
+   353→                      type="button"
+   354→                      onClick={() => setHeaderStyle(s.value)}
+   355→                      aria-pressed={active}
+   356→                      className={cn(
+   357→                        "rounded-lg border p-3 text-left transition-all hover:border-emerald-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   358→                        active
+   359→                          ? "border-emerald-500/60 bg-emerald-500/5 ring-2 ring-emerald-500/20"
+   360→                          : "border-border"
+   361→                      )}
+   362→                    >
+   363→                      <span className="flex h-4 items-end" aria-hidden="true">
+   364→                        {s.value === "classic" ? (
+   365→                          <span className="mx-auto h-1.5 w-10 rounded-full bg-zinc-400 dark:bg-zinc-500" />
+   366→                        ) : s.value === "modern" ? (
+   367→                          <span className="flex items-center gap-1">
+   368→                            <span className="h-3.5 w-1 rounded bg-emerald-500" />
+   369→                            <span className="h-1.5 w-9 rounded-full bg-zinc-400 dark:bg-zinc-500" />
+   370→                          </span>
+   371→                        ) : (
+   372→                          <span className="h-1 w-7 rounded-full bg-zinc-400 dark:bg-zinc-500" />
+   373→                        )}
+   374→                      </span>
+   375→                      <span className="mt-2 block text-xs font-semibold">{s.label}</span>
+   376→                      <span className="block text-[11px] text-muted-foreground">{s.blurb}</span>
+   377→                    </button>
+   378→                  );
+   379→                })}
+   380→              </div>
+   381→            </div>
+   382→
+   383→            {/* Tailor to a job description (Job Match scans) */}
+   384→            <div
+   385→              className="min-w-0 space-y-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 sm:col-span-2 dark:border-emerald-500/25 dark:bg-emerald-500/[0.06]"
+   386→              aria-label="Tailor to a job description"
+   387→            >
+   388→              <div className="flex flex-wrap items-center gap-2">
+   389→                <Crosshair
+   390→                  className="size-4 text-emerald-600 dark:text-emerald-400"
+   391→                  aria-hidden="true"
+   392→                />
+   393→                <h3 className="text-sm font-semibold">Tailor to a job description</h3>
+   394→                {selectedJd ? (
+   395→                  <Button
+   396→                    variant="ghost"
+   397→                    size="sm"
+   398→                    className="ml-auto h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+   399→                    onClick={handleClearJd}
+   400→                    aria-label="Clear the selected job description"
+   401→                  >
+   402→                    <X className="size-3.5" aria-hidden="true" />
+   403→                    Clear
+   404→                  </Button>
+   405→                ) : null}
+   406→              </div>
+   407→
+   408→              {!mounted ? (
+   409→                <div
+   410→                  className="h-11 animate-pulse rounded-lg bg-emerald-500/5"
+   411→                  aria-hidden="true"
+   412→                />
+   413→              ) : jdEntries.length === 0 ? (
+   414→                <div className="rounded-lg border border-dashed border-emerald-500/30 px-4 py-5 text-center">
+   415→                  <p className="text-sm font-medium">
+   416→                    No Job Match scans for this resume yet
+   417→                  </p>
+   418→                  <p className="mt-1 text-xs text-muted-foreground">
+   419→                    Scan a job description to see what it needs — then weave it in here.
+   420→                  </p>
+   421→                  <Link
+   422→                    href="/dashboard/match"
+   423→                    className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-emerald-300"
+   424→                    aria-label="Run a match scan first in the Job Match Scanner"
+   425→                  >
+   426→                    Run a match scan first
+   427→                    <ArrowRight className="size-3.5" aria-hidden="true" />
+   428→                  </Link>
+   429→                </div>
+   430→              ) : (
+   431→                <>
+   432→                  <ul
+   433→                    aria-label="Job descriptions scanned for this resume"
+   434→                    className="space-y-1.5"
+   435→                  >
+   436→                    {jdEntries.map((entry) => {
+   437→                      const active = entry.id === selectedJdId;
+   438→                      return (
+   439→                        <li key={entry.id} className="relative list-none">
+   440→                          {active ? (
+   441→                            <span
+   442→                              aria-hidden="true"
+   443→                              className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-emerald-500"
+   444→                            />
+   445→                          ) : null}
+   446→                          <button
+   447→                            type="button"
+   448→                            onClick={() => setSelectedJdId(active ? null : entry.id)}
+   449→                            aria-pressed={active}
+   450→                            aria-label={`Tailor the letter to ${entry.jdBrief} — match score ${entry.score} of 100, scanned ${formatDistanceToNow(entry.at, { addSuffix: true })}`}
+   451→                            className={cn(
+   452→                              "flex w-full items-center gap-2.5 rounded-lg border text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   453→                              active
+   454→                                ? "border-emerald-500/60 bg-emerald-500/10 py-2.5 pl-4 pr-10 ring-2 ring-emerald-500/20"
+   455→                                : "border-border/70 py-2.5 pl-3 pr-3 hover:border-emerald-500/40 hover:bg-emerald-500/[0.03]"
+   456→                            )}
+   457→                          >
+   458→                            <span className="min-w-0 flex-1 truncate text-sm">
+   459→                              {entry.jdBrief}
+   460→                            </span>
+   461→                            <span
+   462→                              className={cn(
+   463→                                "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums",
+   464→                                gradeBadgeClass(entry.score)
+   465→                              )}
+   466→                            >
+   467→                              {entry.score}
+   468→                            </span>
+   469→                            <span className="hidden w-20 shrink-0 text-right text-[11px] text-muted-foreground sm:inline">
+   470→                              {formatDistanceToNow(entry.at, { addSuffix: true })}
+   471→                            </span>
+   472→                          </button>
+   473→                          {active ? (
+   474→                            <button
+   475→                              type="button"
+   476→                              onClick={handleClearJd}
+   477→                              aria-label={`Stop tailoring to ${entry.jdBrief}`}
+   478→                              className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-emerald-500/15 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-emerald-300"
+   479→                            >
+   480→                              <X className="size-3.5" aria-hidden="true" />
+   481→                            </button>
+   482→                          ) : null}
+   483→                        </li>
+   484→                      );
+   485→                    })}
+   486→                  </ul>
+   487→                  <p
+   488→                    className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300"
+   489→                    role="status"
+   490→                  >
+   491→                    {selectedJd ? (
+   492→                      <>
+   493→                        <Sparkles className="size-3.5 shrink-0" aria-hidden="true" />
+   494→                        The letter will weave in up to 5 keywords this JD needs.
+   495→                      </>
+   496→                    ) : (
+   497→                      <span className="text-muted-foreground">
+   498→                        Select a scan above to weave its missing keywords into the letter.
+   499→                      </span>
+   500→                    )}
+   501→                  </p>
+   502→                </>
+   503→              )}
+   504→            </div>
+   505→
+   506→            <div className="sm:col-span-2">
+   507→              <Button
+   508→                onClick={handleGenerate}
+   509→                disabled={generating || !resume || !company.trim()}
+   510→                className="relative w-full overflow-hidden bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/25 hover:from-emerald-600 hover:to-teal-700 sm:w-auto"
+   511→                aria-label="Generate cover letter with AI"
+   512→              >
+   513→                {generating ? (
+   514→                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+   515→                ) : (
+   516→                  <Sparkles className="size-4" aria-hidden="true" />
+   517→                )}
+   518→                {generating ? "Generating…" : "Generate with AI"}
+   519→                {generating ? (
+   520→                  <motion.span
+   521→                    aria-hidden="true"
+   522→                    className="absolute inset-0 bg-gradient-to-r from-transparent via-white/25 to-transparent"
+   523→                    initial={{ x: "-150%" }}
+   524→                    animate={{ x: "150%" }}
+   525→                    transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+   526→                  />
+   527→                ) : null}
+   528→              </Button>
+   529→              {!company.trim() ? (
+   530→                <p className="mt-2 text-xs text-muted-foreground">
+   531→                  Add a company name above to unlock generation.
+   532→                </p>
+   533→              ) : null}
+   534→            </div>
+   535→          </CardContent>
+   536→        </Card>
+   537→      </motion.section>
+   538→
+   539→      {/* Output */}
+   540→      {generating && !letter ? (
+   541→        <motion.section variants={staggerItem} aria-busy="true" aria-label="Generating letter">
+   542→          <div className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-xl border bg-white shadow-xl shadow-zinc-950/5 dark:bg-zinc-900">
+   543→            <div className="h-1.5 w-full bg-gradient-to-r from-emerald-500 to-teal-500" aria-hidden="true" />
+   544→            <div className="space-y-3 p-8 sm:p-10" aria-hidden="true">
+   545→              <div className="mx-auto h-3 w-36 rounded bg-muted" />
+   546→              <div className="h-2 w-48 rounded bg-muted/70" />
+   547→              <div className="mt-8 space-y-2.5">
+   548→                {[100, 94, 97, 88, 0, 96, 90, 72].map((w, i) =>
+   549→                  w === 0 ? (
+   550→                    <div key={i} className="h-2" />
+   551→                  ) : (
+   552→                    <div key={i} className="h-2 rounded bg-muted" style={{ width: `${w}%` }} />
+   553→                  )
+   554→                )}
+   555→              </div>
+   556→            </div>
+   557→            <motion.div
+   558→              aria-hidden="true"
+   559→              className="pointer-events-none absolute inset-x-0 h-16 bg-gradient-to-b from-transparent via-emerald-400/20 to-transparent"
+   560→              initial={{ top: "-20%" }}
+   561→              animate={{ top: "110%" }}
+   562→              transition={{ duration: 1.3, repeat: Infinity, ease: "linear" }}
+   563→            />
+   564→          </div>
+   565→          <p className="mt-4 text-center text-sm text-muted-foreground" role="status">
+   566→            <Loader2 className="mr-2 inline size-4 animate-spin text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+   567→            Drafting your cover letter
+   568→            <span className="animate-pulse" aria-hidden="true">…</span>
+   569→          </p>
+   570→        </motion.section>
+   571→      ) : letter !== null ? (
+   572→        <motion.section variants={staggerItem} aria-label="Generated cover letter">
+   573→          <motion.article
+   574→            variants={fadeInScale}
+   575→            aria-busy={typing}
+   576→            className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-xl border bg-white text-zinc-900 shadow-xl shadow-zinc-950/5 dark:bg-zinc-900 dark:text-zinc-100"
+   577→          >
+   578→            {headerStyle === "modern" ? (
+   579→              <div className="h-1.5 w-full bg-gradient-to-r from-emerald-500 to-teal-500" aria-hidden="true" />
+   580→            ) : null}
+   581→            <div className="p-7 font-serif text-[15px] leading-relaxed sm:p-10">
+   582→              {/* Letterhead */}
+   583→              <div
+   584→                className={cn(
+   585→                  "mb-6 space-y-1 pb-4",
+   586→                  headerStyle === "classic" && "border-b-4 border-double border-zinc-200 pb-5 text-center dark:border-zinc-700",
+   587→                  headerStyle === "modern" && "border-l-4 border-emerald-500 pl-4",
+   588→                  headerStyle === "minimal" && "pb-6"
+   589→                )}
+   590→              >
+   591→                {headerLines.map((line, i) => (
+   592→                  <p
+   593→                    key={i}
+   594→                    className={cn(
+   595→                      i === 0 && "text-lg font-semibold tracking-wide",
+   596→                      i === 1 && "text-xs text-zinc-500 dark:text-zinc-400"
+   597→                    )}
+   598→                  >
+   599→                    {line}
+   600→                  </p>
+   601→                ))}
+   602→              </div>
+   603→              {/* Body + signature */}
+   604→              <div className="whitespace-pre-wrap">
+   605→                {bodyText}
+   606→                {typing ? (
+   607→                  <span
+   608→                    className="ml-0.5 inline-block h-4 w-[2px] translate-y-[3px] animate-pulse bg-emerald-500"
+   609→                    aria-hidden="true"
+   610→                  />
+   611→                ) : null}
+   612→              </div>
+   613→            </div>
+   614→          </motion.article>
+   615→
+   616→          {/* Tailoring strip: badge + injected keyword chips */}
+   617→          {injected.length > 0 ? (
+   618→            <motion.div
+   619→              key={`tailored-${genKey}`}
+   620→              variants={staggerContainer}
+   621→              initial="hidden"
+   622→              animate="show"
+   623→              className="mx-auto mt-4 flex w-full max-w-2xl flex-wrap items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-4 py-3 dark:bg-emerald-500/[0.08]"
+   624→            >
+   625→              <Badge
+   626→                className="shrink-0 border-emerald-500/30 bg-emerald-500/15 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200"
+   627→                aria-label="This letter is tailored to a job description"
+   628→              >
+   629→                <Crosshair className="size-3" aria-hidden="true" />
+   630→                Tailored to JD
+   631→              </Badge>
+   632→              <ul
+   633→                className="flex flex-wrap items-center gap-1.5"
+   634→                aria-label="Keywords woven into this letter"
+   635→              >
+   636→                {injected.map((kw) => (
+   637→                  <motion.li
+   638→                    key={kw}
+   639→                    variants={chipItem}
+   640→                    className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-background px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:text-emerald-200"
+   641→                  >
+   642→                    <Plus
+   643→                      className="size-3 text-emerald-600 dark:text-emerald-400"
+   644→                      aria-hidden="true"
+   645→                    />
+   646→                    {keywordLabel(kw)}
+   647→                  </motion.li>
+   648→                ))}
+   649→              </ul>
+   650→            </motion.div>
+   651→          ) : null}
+   652→
+   653→          {/* Status + actions */}
+   654→          <div className="mx-auto mt-5 w-full max-w-2xl space-y-4">
+   655→            <p
+   656→              className="flex items-center justify-center gap-2 text-xs font-medium text-muted-foreground"
+   657→              role="status"
+   658→            >
+   659→              <span
+   660→                aria-hidden="true"
+   661→                className={cn(
+   662→                  "size-1.5 rounded-full",
+   663→                  typing ? "animate-pulse bg-amber-500" : "bg-emerald-500"
+   664→                )}
+   665→              />
+   666→              {typing ? "Generating" : `Draft ready · ${letter.length} characters`}
+   667→            </p>
+   668→            <div className="flex flex-wrap items-center justify-center gap-2">
+   669→              {typing ? (
+   670→                <Button variant="ghost" size="sm" onClick={handleSkip}>
+   671→                  <SkipForward className="size-4" aria-hidden="true" />
+   672→                  Skip animation
+   673→                </Button>
+   674→              ) : null}
+   675→              <Button variant="outline" size="sm" onClick={handleCopy} disabled={!letter}>
+   676→                <Copy className="size-4" aria-hidden="true" />
+   677→                Copy
+   678→              </Button>
+   679→              <Button variant="outline" size="sm" onClick={handleDownload} disabled={!letter}>
+   680→                <Download className="size-4" aria-hidden="true" />
+   681→                Download .txt
+   682→              </Button>
+   683→              <Button
+   684→                variant="outline"
+   685→                size="sm"
+   686→                onClick={handleRegenerate}
+   687→                disabled={generating}
+   688→              >
+   689→                <RefreshCw className={cn("size-4", generating && "animate-spin")} aria-hidden="true" />
+   690→                Regenerate
+   691→              </Button>
+   692→              <Button
+   693→                size="sm"
+   694→                onClick={handleSave}
+   695→                className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   696→              >
+   697→                <Save className="size-4" aria-hidden="true" />
+   698→                Save
+   699→              </Button>
+   700→            </div>
+   701→          </div>
+   702→        </motion.section>
+   703→      ) : (
+   704→        /* Empty config state */
+   705→        <motion.section variants={staggerItem} aria-label="Getting started">
+   706→          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed p-10 text-center sm:p-14">
+   707→            <div className="relative" aria-hidden="true">
+   708→              <motion.div
+   709→                className="flex size-20 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/25"
+   710→                animate={{ y: [0, -5, 0] }}
+   711→                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+   712→              >
+   713→                <Mail className="size-9" />
+   714→              </motion.div>
+   715→              <motion.span
+   716→                className="absolute -right-9 top-0 flex size-9 items-center justify-center rounded-lg border bg-card text-amber-600 shadow-sm dark:text-amber-400"
+   717→                animate={{ y: [0, 6, 0] }}
+   718→                transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+   719→              >
+   720→                <Briefcase className="size-4" />
+   721→              </motion.span>
+   722→              <motion.span
+   723→                className="absolute -left-9 bottom-0 flex size-9 items-center justify-center rounded-lg border bg-card text-violet-600 shadow-sm dark:text-violet-400"
+   724→                animate={{ y: [0, -6, 0] }}
+   725→                transition={{ duration: 2.9, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+   726→              >
+   727→                <Palette className="size-4" />
+   728→              </motion.span>
+   729→            </div>
+   730→            <h2 className="mt-6 font-display text-xl font-semibold">
+   731→              Tell us where you&apos;re applying
+   732→            </h2>
+   733→            <p className="mt-2 max-w-md text-sm text-muted-foreground">
+   734→              Add a company and role above, choose a tone, and we&apos;ll draft a
+   735→              tailored cover letter from your resume — complete with letterhead
+   736→              and signature.
+   737→            </p>
+   738→          </div>
+   739→        </motion.section>
+   740→      )}
+   741→    </motion.div>
+   742→  );
+   743→}
+   744→

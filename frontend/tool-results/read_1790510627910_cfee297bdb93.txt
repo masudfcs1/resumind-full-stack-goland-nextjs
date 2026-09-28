@@ -1,0 +1,998 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import Link from "next/link";
+     5→import { motion } from "framer-motion";
+     6→import {
+     7→  ArrowRight,
+     8→  Brain,
+     9→  Briefcase,
+    10→  Building2,
+    11→  Check,
+    12→  Compass,
+    13→  Focus,
+    14→  GraduationCap,
+    15→  ListChecks,
+    16→  Loader2,
+    17→  MessagesSquare,
+    18→  Shuffle,
+    19→  Sparkles,
+    20→  Star,
+    21→  Wand2,
+    22→} from "lucide-react";
+    23→import { toast } from "sonner";
+    24→
+    25→import { Badge } from "@/components/ui/badge";
+    26→import { Button } from "@/components/ui/button";
+    27→import {
+    28→  Card,
+    29→  CardContent,
+    30→  CardDescription,
+    31→  CardHeader,
+    32→  CardTitle,
+    33→} from "@/components/ui/card";
+    34→import { Skeleton } from "@/components/ui/skeleton";
+    35→import { STAGE_META, useResumeStore, type ApplicationStage } from "@/lib/resume-store";
+    36→import { useMounted } from "@/lib/use-mounted";
+    37→import { cn } from "@/lib/utils";
+    38→
+    39→import { FocusMode } from "@/components/interview/focus-mode";
+    40→import { Flashcard } from "@/components/interview/flashcard";
+    41→import {
+    42→  favoriteKey,
+    43→  readFavorites,
+    44→  writeFavorites,
+    45→} from "@/components/interview/favorites";
+    46→import {
+    47→  CATEGORY_META,
+    48→  CATEGORY_ORDER,
+    49→  DIFFICULTY_META,
+    50→  generateQuestions,
+    51→  type DifficultyFilter,
+    52→  type PracticeQuestion,
+    53→  type QuestionCategory,
+    54→  type StarAnswer,
+    55→} from "@/components/interview/question-bank";
+    56→import {
+    57→  buildCompanyQuestions,
+    58→  companyAvatarGradient,
+    59→  STAGE_HINT,
+    60→} from "@/components/interview/company-questions";
+    61→import { TipsPanel } from "@/components/interview/tips-panel";
+    62→import { ResumeSelect } from "@/components/tools/resume-select";
+    63→import { ToolPageHeader } from "@/components/tools/tool-page-header";
+    64→import { staggerContainer, staggerItem } from "@/components/tools/variants";
+    65→import { companyInitials } from "@/components/tracker/stage-utils";
+    66→
+    67→/* ============================== Constants ============================== */
+    68→
+    69→const QUESTIONS_PER_SET = 8;
+    70→const GENERATE_DELAY_MS = 1200;
+    71→const COMPANY_GENERATE_DELAY_MS = 700;
+    72→
+    73→/** Where the active session's questions came from. */
+    74→type SessionOrigin =
+    75→  | { kind: "bank" }
+    76→  | { kind: "company"; company: string; role: string; stage: ApplicationStage };
+    77→
+    78→/** One deduped company derived from the Job Tracker applications. */
+    79→interface CompanyEntry {
+    80→  key: string;
+    81→  company: string;
+    82→  role: string;
+    83→  stage: ApplicationStage;
+    84→  count: number;
+    85→}
+    86→
+    87→const DIFFICULTY_FILTERS: { value: DifficultyFilter; label: string }[] = [
+    88→  { value: "all", label: "All" },
+    89→  { value: "easy", label: "Easy" },
+    90→  { value: "medium", label: "Medium" },
+    91→  { value: "hard", label: "Hard" },
+    92→];
+    93→
+    94→/* ============================== Sub components ============================== */
+    95→
+    96→function DifficultySegmentedControl({
+    97→  value,
+    98→  onChange,
+    99→}: {
+   100→  value: DifficultyFilter;
+   101→  onChange: (value: DifficultyFilter) => void;
+   102→}) {
+   103→  return (
+   104→    <div
+   105→      role="group"
+   106→      aria-label="Filter by difficulty"
+   107→      className="flex items-center gap-1 rounded-lg border bg-muted/50 p-1"
+   108→    >
+   109→      {DIFFICULTY_FILTERS.map((option) => {
+   110→        const active = value === option.value;
+   111→        return (
+   112→          <button
+   113→            key={option.value}
+   114→            type="button"
+   115→            aria-pressed={active}
+   116→            onClick={() => onChange(option.value)}
+   117→            className={cn(
+   118→              "rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+   119→              active
+   120→                ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+   121→                : "text-muted-foreground hover:text-foreground"
+   122→            )}
+   123→          >
+   124→            {option.label}
+   125→          </button>
+   126→        );
+   127→      })}
+   128→    </div>
+   129→  );
+   130→}
+   131→
+   132→function CategoryChips({
+   133→  selected,
+   134→  onToggle,
+   135→}: {
+   136→  selected: QuestionCategory[];
+   137→  onToggle: (category: QuestionCategory) => void;
+   138→}) {
+   139→  return (
+   140→    <div className="flex flex-wrap gap-2" role="group" aria-label="Question categories">
+   141→      {CATEGORY_ORDER.map((cat) => {
+   142→        const meta = CATEGORY_META[cat];
+   143→        const Icon = meta.icon;
+   144→        const active = selected.includes(cat);
+   145→        return (
+   146→          <button
+   147→            key={cat}
+   148→            type="button"
+   149→            aria-pressed={active}
+   150→            onClick={() => onToggle(cat)}
+   151→            className={cn(
+   152→              "inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-all",
+   153→              active
+   154→                ? cn(meta.tint, "shadow-sm")
+   155→                : "border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground"
+   156→            )}
+   157→          >
+   158→            <Icon className="size-4" aria-hidden="true" />
+   159→            {meta.label}
+   160→            {active ? (
+   161→              <Check className="size-3.5" aria-hidden="true" />
+   162→            ) : null}
+   163→          </button>
+   164→        );
+   165→      })}
+   166→    </div>
+   167→  );
+   168→}
+   169→
+   170→/** Rounded initials avatar with a deterministic tasteful gradient. */
+   171→function CompanyAvatar({
+   172→  company,
+   173→  className,
+   174→}: {
+   175→  company: string;
+   176→  className?: string;
+   177→}) {
+   178→  return (
+   179→    <span
+   180→      aria-hidden="true"
+   181→      className={cn(
+   182→        "flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br font-bold text-white shadow-sm",
+   183→        companyAvatarGradient(company),
+   184→        className ?? "size-8 text-[11px]"
+   185→      )}
+   186→    >
+   187→      {companyInitials(company)}
+   188→    </span>
+   189→  );
+   190→}
+   191→
+   192→/** Stage badge using the tracker's color conventions (dot + label). */
+   193→function StageBadge({ stage }: { stage: ApplicationStage }) {
+   194→  const meta = STAGE_META[stage];
+   195→  return (
+   196→    <Badge
+   197→      variant="outline"
+   198→      className="shrink-0 gap-1.5 border-border/70 bg-background/60 text-[10px] font-medium text-muted-foreground"
+   199→    >
+   200→      <span
+   201→        aria-hidden="true"
+   202→        className="size-1.5 rounded-full"
+   203→        style={{ backgroundColor: meta.color }}
+   204→      />
+   205→      {meta.label}
+   206→    </Badge>
+   207→  );
+   208→}
+   209→
+   210→/**
+   211→ * Amber star toggle for favoriting a company. Filled amber-400 when active,
+   212→ * pops on press, and stops propagation so it can live beside a select button.
+   213→ */
+   214→function StarToggle({
+   215→  active,
+   216→  companyName,
+   217→  onToggle,
+   218→  size = "size-7",
+   219→  iconSize = "size-3.5",
+   220→  className,
+   221→}: {
+   222→  active: boolean;
+   223→  companyName: string;
+   224→  onToggle: () => void;
+   225→  size?: string;
+   226→  iconSize?: string;
+   227→  className?: string;
+   228→}) {
+   229→  const label = active
+   230→    ? `Remove ${companyName} from favorites`
+   231→    : `Add ${companyName} to favorites`;
+   232→  return (
+   233→    <motion.button
+   234→      type="button"
+   235→      whileTap={{ scale: 0.85 }}
+   236→      aria-pressed={active}
+   237→      aria-label={label}
+   238→      title={label}
+   239→      onClick={(e) => {
+   240→        e.stopPropagation();
+   241→        onToggle();
+   242→      }}
+   243→      className={cn(
+   244→        "flex shrink-0 items-center justify-center rounded-full transition-colors",
+   245→        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+   246→        active
+   247→          ? "text-amber-400 hover:bg-amber-500/10"
+   248→          : "text-muted-foreground/60 hover:bg-amber-500/10 hover:text-amber-500",
+   249→        size,
+   250→        className
+   251→      )}
+   252→    >
+   253→      <Star
+   254→        aria-hidden="true"
+   255→        className={cn(iconSize, active && "fill-amber-400")}
+   256→      />
+   257→    </motion.button>
+   258→  );
+   259→}
+   260→
+   261→/** Tabs-like All/Starred two-button filter for the company chip list. */
+   262→function FavFilterToggle({
+   263→  value,
+   264→  onChange,
+   265→  starredCount,
+   266→}: {
+   267→  value: "all" | "starred";
+   268→  onChange: (value: "all" | "starred") => void;
+   269→  starredCount: number;
+   270→}) {
+   271→  const options = [
+   272→    { value: "all" as const, label: "All" },
+   273→    { value: "starred" as const, label: "Starred", count: starredCount },
+   274→  ];
+   275→  return (
+   276→    <div
+   277→      role="group"
+   278→      aria-label="Filter companies by favorites"
+   279→      className="flex items-center gap-1 rounded-lg border bg-muted/50 p-1"
+   280→    >
+   281→      {options.map((option) => {
+   282→        const active = value === option.value;
+   283→        return (
+   284→          <button
+   285→            key={option.value}
+   286→            type="button"
+   287→            aria-pressed={active}
+   288→            onClick={() => onChange(option.value)}
+   289→            className={cn(
+   290→              "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all",
+   291→              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+   292→              active
+   293→                ? "bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/40 dark:text-emerald-300"
+   294→                : "text-muted-foreground hover:text-foreground"
+   295→            )}
+   296→          >
+   297→            {option.value === "starred" ? (
+   298→              <Star
+   299→                aria-hidden="true"
+   300→                className={cn("size-3", active && "fill-amber-400 text-amber-400")}
+   301→              />
+   302→            ) : null}
+   303→            {option.label}
+   304→            {option.count !== undefined ? (
+   305→              <span className="tabular-nums opacity-70">{option.count}</span>
+   306→            ) : null}
+   307→          </button>
+   308→        );
+   309→      })}
+   310→    </div>
+   311→  );
+   312→}
+   313→
+   314→/** Shimmering placeholder card shown while "AI" generates the set. */
+   315→function CardSkeleton() {
+   316→  return (
+   317→    <div className="relative overflow-hidden rounded-2xl border bg-card p-5">
+   318→      <div className="flex items-center justify-between">
+   319→        <Skeleton className="h-5 w-8" />
+   320→        <Skeleton className="h-5 w-24 rounded-full" />
+   321→      </div>
+   322→      <Skeleton className="mt-6 h-5 w-full" />
+   323→      <Skeleton className="mt-2 h-5 w-3/4" />
+   324→      <div className="mt-10 flex items-center justify-between">
+   325→        <Skeleton className="h-2.5 w-12 rounded-full" />
+   326→        <Skeleton className="h-3.5 w-28" />
+   327→      </div>
+   328→      <motion.div
+   329→        aria-hidden="true"
+   330→        className="pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-emerald-500/10 to-transparent"
+   331→        animate={{ x: ["-140%", "360%"] }}
+   332→        transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+   333→      />
+   334→    </div>
+   335→  );
+   336→}
+   337→
+   338→/* ============================== Page ============================== */
+   339→
+   340→export default function InterviewPage() {
+   341→  const mounted = useMounted();
+   342→  const resumes = useResumeStore((s) => s.resumes);
+   343→  const activeResumeId = useResumeStore((s) => s.activeResumeId);
+   344→  const setActive = useResumeStore((s) => s.setActive);
+   345→  const applications = useResumeStore((s) => s.applications);
+   346→
+   347→  const resume = resumes.find((r) => r.id === activeResumeId) ?? resumes[0];
+   348→
+   349→  const [selectedCategories, setSelectedCategories] =
+   350→    React.useState<QuestionCategory[]>(CATEGORY_ORDER);
+   351→  const [difficulty, setDifficulty] = React.useState<DifficultyFilter>("all");
+   352→  const [generating, setGenerating] = React.useState(false);
+   353→  const [session, setSession] = React.useState<PracticeQuestion[] | null>(null);
+   354→  const [generation, setGeneration] = React.useState(0);
+   355→  const [practicedIds, setPracticedIds] = React.useState<Set<string>>(new Set());
+   356→  const [focusOpen, setFocusOpen] = React.useState(false);
+   357→  const [focusIndex, setFocusIndex] = React.useState(0);
+   358→  const [starNotes, setStarNotes] = React.useState<Record<string, StarAnswer>>({});
+   359→  const [sessionOrigin, setSessionOrigin] = React.useState<SessionOrigin | null>(null);
+   360→  const [companyVariant, setCompanyVariant] = React.useState(0);
+   361→  /** Starred companies (normalized keys) — lazy-read after mount, SSR-safe. */
+   362→  const [favorites, setFavorites] = React.useState<string[]>(() => readFavorites());
+   363→  const [favFilter, setFavFilter] = React.useState<"all" | "starred">("all");
+   364→  const timerRef = React.useRef<number | null>(null);
+   365→
+   366→  /** Adds/removes a company from favorites and persists best-effort. */
+   367→  const toggleFavorite = React.useCallback(
+   368→    (companyName: string) => {
+   369→      const key = favoriteKey(companyName);
+   370→      const wasFavorite = favorites.includes(key);
+   371→      const next = wasFavorite
+   372→        ? favorites.filter((f) => f !== key)
+   373→        : [...favorites, key];
+   374→      setFavorites(next);
+   375→      if (!writeFavorites(next)) {
+   376→        toast.error("Couldn't save favorites", {
+   377→          description: "Browser storage is unavailable in this session.",
+   378→        });
+   379→      }
+   380→      if (wasFavorite) {
+   381→        toast(`${companyName} removed from favorites`);
+   382→      } else {
+   383→        toast.success(`${companyName} added to favorites`);
+   384→      }
+   385→    },
+   386→    [favorites]
+   387→  );
+   388→
+   389→  React.useEffect(() => {
+   390→    // If the last favorite is un-starred while the Starred filter is active,
+   391→    // fall back to All so the list never renders as an empty mystery.
+   392→    if (favFilter === "starred" && favorites.length === 0) setFavFilter("all");
+   393→  }, [favFilter, favorites.length]);
+   394→
+   395→  React.useEffect(() => {
+   396→    return () => {
+   397→      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+   398→    };
+   399→  }, []);
+   400→
+   401→  const generate = React.useCallback(() => {
+   402→    if (!resume || generating) return;
+   403→    setGenerating(true);
+   404→    const next = generateQuestions(resume, {
+   405→      categories: selectedCategories,
+   406→      difficulty,
+   407→      count: QUESTIONS_PER_SET,
+   408→    });
+   409→    timerRef.current = window.setTimeout(() => {
+   410→      if (next.length === 0) {
+   411→        toast.warning("No questions match those filters", {
+   412→          description: "Try selecting more categories or a different difficulty.",
+   413→        });
+   414→        setGenerating(false);
+   415→        return;
+   416→      }
+   417→      setSession(next);
+   418→      setPracticedIds(new Set());
+   419→      setFocusIndex(0);
+   420→      setGeneration((g) => g + 1);
+   421→      setSessionOrigin({ kind: "bank" });
+   422→      setCompanyVariant(0);
+   423→      setGenerating(false);
+   424→      toast.success(`Question set ready — ${next.length} questions`, {
+   425→        description: `Tailored from "${resume.title}". Flip a card to reveal the STAR framework.`,
+   426→      });
+   427→    }, GENERATE_DELAY_MS);
+   428→  }, [resume, generating, selectedCategories, difficulty]);
+   429→
+   430→  /** Starts a company-specific session from a tracked application. */
+   431→  const startCompanySession = React.useCallback(
+   432→    (entry: CompanyEntry) => {
+   433→      if (generating) return;
+   434→      setGenerating(true);
+   435→      setCompanyVariant(0);
+   436→      const next = buildCompanyQuestions(entry.company, entry.role, entry.stage, {
+   437→        resume,
+   438→        variant: 0,
+   439→      });
+   440→      timerRef.current = window.setTimeout(() => {
+   441→        setSession(next);
+   442→        setPracticedIds(new Set());
+   443→        setFocusIndex(0);
+   444→        setGeneration((g) => g + 1);
+   445→        setSessionOrigin({
+   446→          kind: "company",
+   447→          company: entry.company,
+   448→          role: entry.role,
+   449→          stage: entry.stage,
+   450→        });
+   451→        setGenerating(false);
+   452→        toast.success(`${entry.company} set ready — ${next.length} questions`, {
+   453→          description: `Built from your tracker · ${STAGE_META[entry.stage].label} stage.`,
+   454→        });
+   455→      }, COMPANY_GENERATE_DELAY_MS);
+   456→    },
+   457→    [generating, resume]
+   458→  );
+   459→
+   460→  /** Re-rolls the pulled questions of the active company set (6 fixed ones stay). */
+   461→  const reshuffleCompany = React.useCallback(() => {
+   462→    if (!sessionOrigin || sessionOrigin.kind !== "company" || generating) return;
+   463→    const variant = companyVariant + 1;
+   464→    setGenerating(true);
+   465→    setCompanyVariant(variant);
+   466→    const next = buildCompanyQuestions(
+   467→      sessionOrigin.company,
+   468→      sessionOrigin.role,
+   469→      sessionOrigin.stage,
+   470→      { resume, variant }
+   471→    );
+   472→    timerRef.current = window.setTimeout(() => {
+   473→      setSession(next);
+   474→      setPracticedIds(new Set());
+   475→      setFocusIndex(0);
+   476→      setGeneration((g) => g + 1);
+   477→      setGenerating(false);
+   478→      toast.success(`${sessionOrigin.company} set reshuffled — ${next.length} questions`);
+   479→    }, COMPANY_GENERATE_DELAY_MS);
+   480→  }, [sessionOrigin, generating, companyVariant, resume]);
+   481→
+   482→  /** Unique companies from the tracker — latest application defines stage/role. */
+   483→  const companySets = React.useMemo<CompanyEntry[]>(() => {
+   484→    const byKey = new Map<string, { entry: CompanyEntry; latest: number }>();
+   485→    for (const app of applications) {
+   486→      const key = app.company.trim().toLowerCase();
+   487→      if (!key) continue;
+   488→      const existing = byKey.get(key);
+   489→      if (existing) {
+   490→        existing.entry.count += 1;
+   491→        if (app.updatedAt > existing.latest) {
+   492→          existing.latest = app.updatedAt;
+   493→          existing.entry.company = app.company;
+   494→          existing.entry.role = app.role;
+   495→          existing.entry.stage = app.stage;
+   496→        }
+   497→      } else {
+   498→        byKey.set(key, {
+   499→          entry: { key, company: app.company, role: app.role, stage: app.stage, count: 1 },
+   500→          latest: app.updatedAt,
+   501→        });
+   502→      }
+   503→    }
+   504→    const all = [...byKey.values()].map((v) => v.entry);
+   505→    // Deterministic ordering: favorites first, each group alphabetical.
+   506→    const byName = (a: CompanyEntry, b: CompanyEntry) =>
+   507→      a.company.localeCompare(b.company, "en", { sensitivity: "base" }) ||
+   508→      a.key.localeCompare(b.key);
+   509→    const starred = all
+   510→      .filter((e) => favorites.includes(e.key))
+   511→      .sort(byName);
+   512→    const rest = all
+   513→      .filter((e) => !favorites.includes(e.key))
+   514→      .sort(byName);
+   515→    return [...starred, ...rest];
+   516→  }, [applications, favorites]);
+   517→
+   518→  /** Chips currently visible — applies the All/Starred filter when set. */
+   519→  const visibleCompanySets = React.useMemo<CompanyEntry[]>(() => {
+   520→    if (favFilter !== "starred" || favorites.length === 0) return companySets;
+   521→    return companySets.filter((c) => favorites.includes(c.key));
+   522→  }, [companySets, favorites, favFilter]);
+   523→
+   524→  const toggleCategory = React.useCallback((cat: QuestionCategory) => {
+   525→    setSelectedCategories((prev) =>
+   526→      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+   527→    );
+   528→  }, []);
+   529→
+   530→  /** Marks a card practiced — each unique card counts once. */
+   531→  const markPracticed = React.useCallback(
+   532→    (id: string) => {
+   533→      setPracticedIds((prev) => {
+   534→        if (prev.has(id)) return prev;
+   535→        const next = new Set(prev);
+   536→        next.add(id);
+   537→        if (session && next.size === session.length) {
+   538→          toast.success("Session complete — every question practiced. Nice work.");
+   539→        }
+   540→        return next;
+   541→      });
+   542→    },
+   543→    [session]
+   544→  );
+   545→
+   546→  const handleNotesChange = React.useCallback((id: string, note: StarAnswer) => {
+   547→    setStarNotes((prev) => ({ ...prev, [id]: note }));
+   548→  }, []);
+   549→
+   550→  const openFocus = (index: number) => {
+   551→    setFocusIndex(index);
+   552→    setFocusOpen(true);
+   553→  };
+   554→
+   555→  const practicedCount = practicedIds.size;
+   556→  const totalCount = session?.length ?? 0;
+   557→  const pct = totalCount > 0 ? Math.round((practicedCount / totalCount) * 100) : 0;
+   558→  const tailoredCount = session?.filter((q) => q.isTailored).length ?? 0;
+   559→
+   560→  /* ============================== Not hydrated yet ============================== */
+   561→
+   562→  if (!mounted) {
+   563→    return (
+   564→      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6" aria-busy="true">
+   565→        <div className="flex items-start gap-4">
+   566→          <Skeleton className="size-12 rounded-xl" />
+   567→          <div className="space-y-2">
+   568→            <Skeleton className="h-7 w-56" />
+   569→            <Skeleton className="h-4 w-96 max-w-full" />
+   570→          </div>
+   571→        </div>
+   572→        <Skeleton className="h-44 w-full rounded-xl" />
+   573→        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+   574→          {Array.from({ length: 6 }).map((_, i) => (
+   575→            <Skeleton key={i} className="h-[350px] rounded-2xl" />
+   576→          ))}
+   577→        </div>
+   578→      </div>
+   579→    );
+   580→  }
+   581→
+   582→  /* ============================== Render ============================== */
+   583→
+   584→  return (
+   585→    <motion.div
+   586→      variants={staggerContainer}
+   587→      initial="hidden"
+   588→      animate="show"
+   589→      className="mx-auto flex w-full max-w-6xl flex-col gap-6"
+   590→    >
+   591→      {/* ============ Header ============ */}
+   592→      <ToolPageHeader
+   593→        icon={MessagesSquare}
+   594→        title="Interview Prep"
+   595→        description="AI-simulated interview training tailored to your resume. Practice with flashcards, study the STAR model answers, and walk in ready."
+   596→        actions={
+   597→          <>
+   598→            <ResumeSelect
+   599→              value={resume?.id ?? ""}
+   600→              onValueChange={setActive}
+   601→              ariaLabel="Resume to tailor questions from"
+   602→              className="w-full sm:w-60"
+   603→            />
+   604→            <DifficultySegmentedControl value={difficulty} onChange={setDifficulty} />
+   605→          </>
+   606→        }
+   607→      />
+   608→
+   609→      {/* ============ Setup card ============ */}
+   610→      <motion.section variants={staggerItem} aria-label="Session setup">
+   611→        <Card>
+   612→          <CardHeader className="pb-4">
+   613→            <CardTitle className="font-display text-base">
+   614→              Build your question set
+   615→            </CardTitle>
+   616→            <CardDescription>
+   617→              Pick categories — the generator mixes difficulties and prefers
+   618→              questions customized from your resume.
+   619→            </CardDescription>
+   620→          </CardHeader>
+   621→          <CardContent className="space-y-4">
+   622→            <CategoryChips
+   623→              selected={selectedCategories}
+   624→              onToggle={toggleCategory}
+   625→            />
+   626→
+   627→            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+   628→              <Sparkles className="size-3.5 text-violet-500" aria-hidden="true" />
+   629→              Sparkle-marked cards reference your most recent role, top skills, and
+   630→              projects.
+   631→            </p>
+   632→
+   633→            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+   634→              <p className="text-sm text-muted-foreground">
+   635→                <span className="font-semibold text-foreground">
+   636→                  {selectedCategories.length}/5
+   637→                </span>{" "}
+   638→                categories ·{" "}
+   639→                <span className="font-semibold text-foreground">
+   640→                  {DIFFICULTY_META[difficulty]?.label ?? "All"}
+   641→                </span>{" "}
+   642→                difficulty ·{" "}
+   643→                <span className="font-semibold text-foreground">
+   644→                  {QUESTIONS_PER_SET} questions
+   645→                </span>{" "}
+   646→                per set
+   647→              </p>
+   648→              <Button
+   649→                onClick={generate}
+   650→                disabled={generating || !resume || selectedCategories.length === 0}
+   651→                className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/25 hover:from-emerald-600 hover:to-teal-700"
+   652→                aria-label="Generate question set"
+   653→              >
+   654→                {generating ? (
+   655→                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+   656→                ) : (
+   657→                  <Wand2 className="size-4" aria-hidden="true" />
+   658→                )}
+   659→                {generating ? "Generating…" : "Generate question set"}
+   660→              </Button>
+   661→            </div>
+   662→          </CardContent>
+   663→        </Card>
+   664→      </motion.section>
+   665→
+   666→      {/* ============ From your tracker ============ */}
+   667→      <motion.section variants={staggerItem} aria-labelledby="tracker-sets-heading">
+   668→        <Card>
+   669→          <CardHeader className="pb-4">
+   670→            <div className="flex flex-wrap items-start justify-between gap-3">
+   671→              <div className="flex items-start gap-3">
+   672→                <span
+   673→                  aria-hidden="true"
+   674→                  className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   675→                >
+   676→                  <Building2 className="size-4" />
+   677→                </span>
+   678→                <div className="space-y-1">
+   679→                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-400">
+   680→                    From your tracker
+   681→                  </p>
+   682→                  <CardTitle className="font-display text-base" id="tracker-sets-heading">
+   683→                    Company-specific question sets
+   684→                  </CardTitle>
+   685→                </div>
+   686→              </div>
+   687→              {favorites.length > 0 ? (
+   688→                <FavFilterToggle
+   689→                  value={favFilter}
+   690→                  onChange={setFavFilter}
+   691→                  starredCount={favorites.length}
+   692→                />
+   693→              ) : null}
+   694→            </div>
+   695→            <CardDescription className="mt-1">
+   696→              Sets built from the companies and roles you are actually pursuing — pick one to
+   697→              start practicing. Star the ones you care about to keep them on top.
+   698→            </CardDescription>
+   699→          </CardHeader>
+   700→          <CardContent>
+   701→            {companySets.length === 0 ? (
+   702→              <div className="flex flex-col items-start gap-4 rounded-xl border border-dashed bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+   703→                <div className="flex items-center gap-3">
+   704→                  <span
+   705→                    aria-hidden="true"
+   706→                    className="flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm"
+   707→                  >
+   708→                    <Briefcase className="size-5" />
+   709→                  </span>
+   710→                  <div>
+   711→                    <p className="text-sm font-medium">No tracked applications yet</p>
+   712→                    <p className="text-xs text-muted-foreground">
+   713→                      Track your first application to unlock company sets.
+   714→                    </p>
+   715→                  </div>
+   716→                </div>
+   717→                <Button asChild variant="outline" size="sm">
+   718→                  <Link href="/dashboard/tracker">
+   719→                    Go to Job Tracker
+   720→                    <ArrowRight className="size-3.5" aria-hidden="true" />
+   721→                  </Link>
+   722→                </Button>
+   723→              </div>
+   724→            ) : (
+   725→              <motion.div
+   726→                variants={staggerContainer}
+   727→                initial="hidden"
+   728→                animate="show"
+   729→                className="flex flex-wrap gap-2.5"
+   730→                role="group"
+   731→                aria-label="Companies from your tracker"
+   732→              >
+   733→                {visibleCompanySets.map((c) => {
+   734→                  const active =
+   735→                    sessionOrigin?.kind === "company" &&
+   736→                    sessionOrigin.company.trim().toLowerCase() === c.key;
+   737→                  const isFavorite = favorites.includes(c.key);
+   738→                  return (
+   739→                    <motion.div
+   740→                      key={c.key}
+   741→                      variants={staggerItem}
+   742→                      layout
+   743→                      transition={{ type: "spring", stiffness: 380, damping: 32 }}
+   744→                    >
+   745→                      <div
+   746→                        className={cn(
+   747→                          "flex items-center gap-1 rounded-full border py-1 pl-1.5 pr-1 transition-all duration-200",
+   748→                          "hover:-translate-y-0.5 hover:border-emerald-500/40 hover:shadow-md hover:shadow-emerald-500/10",
+   749→                          active
+   750→                            ? "border-emerald-500/60 bg-emerald-500/10 ring-2 ring-emerald-500/40"
+   751→                            : "border-border bg-background"
+   752→                        )}
+   753→                      >
+   754→                        <button
+   755→                          type="button"
+   756→                          aria-pressed={active}
+   757→                          aria-label={`Practice the ${c.company} interview set`}
+   758→                          onClick={() => startCompanySession(c)}
+   759→                          className={cn(
+   760→                            "flex items-center gap-2.5 rounded-full py-0.5 pl-0.5 pr-2 text-left transition-colors",
+   761→                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+   762→                          )}
+   763→                        >
+   764→                          <CompanyAvatar company={c.company} />
+   765→                          <span className="flex flex-col leading-tight">
+   766→                            <span className="text-sm font-semibold">{c.company}</span>
+   767→                            <span className="text-[10.5px] text-muted-foreground">
+   768→                              {c.count} {c.count === 1 ? "application" : "applications"} · {c.role}
+   769→                            </span>
+   770→                          </span>
+   771→                          <StageBadge stage={c.stage} />
+   772→                        </button>
+   773→                        <StarToggle
+   774→                          active={isFavorite}
+   775→                          companyName={c.company}
+   776→                          onToggle={() => toggleFavorite(c.company)}
+   777→                        />
+   778→                      </div>
+   779→                    </motion.div>
+   780→                  );
+   781→                })}
+   782→              </motion.div>
+   783→            )}
+   784→          </CardContent>
+   785→        </Card>
+   786→      </motion.section>
+   787→
+   788→      {/* ============ Generating skeleton ============ */}
+   789→      {generating ? (
+   790→        <motion.div
+   791→          variants={staggerItem}
+   792→          aria-busy="true"
+   793→          aria-label="Generating questions"
+   794→          className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3"
+   795→        >
+   796→          {Array.from({ length: QUESTIONS_PER_SET }).map((_, i) => (
+   797→            <CardSkeleton key={i} />
+   798→          ))}
+   799→          <p aria-live="polite" className="sr-only">
+   800→            Generating your question set…
+   801→          </p>
+   802→        </motion.div>
+   803→      ) : session && session.length > 0 ? (
+   804→        <>
+   805→          {/* ============ Company set header ============ */}
+   806→          {sessionOrigin?.kind === "company" ? (
+   807→            <motion.section
+   808→              key={`cset-${sessionOrigin.company}-${companyVariant}`}
+   809→              variants={staggerItem}
+   810→              initial="hidden"
+   811→              animate="show"
+   812→              aria-label={`${sessionOrigin.company} interview set`}
+   813→              className="rounded-2xl border bg-card p-4 sm:p-5"
+   814→            >
+   815→              <div className="flex flex-wrap items-center gap-3">
+   816→                <CompanyAvatar company={sessionOrigin.company} className="size-10 text-xs" />
+   817→                <div className="min-w-0 flex-1">
+   818→                  <div className="flex flex-wrap items-center gap-2">
+   819→                    <h2 className="font-display text-base font-semibold">
+   820→                      {sessionOrigin.company} interview set
+   821→                    </h2>
+   822→                    <StageBadge stage={sessionOrigin.stage} />
+   823→                    <Badge
+   824→                      variant="outline"
+   825→                      className="text-[10px] text-muted-foreground"
+   826→                    >
+   827→                      {session.length} questions
+   828→                    </Badge>
+   829→                  </div>
+   830→                  <p className="mt-0.5 text-xs text-muted-foreground">{sessionOrigin.role}</p>
+   831→                </div>
+   832→                <div className="ml-auto flex items-center gap-1.5">
+   833→                  <StarToggle
+   834→                    active={favorites.includes(favoriteKey(sessionOrigin.company))}
+   835→                    companyName={sessionOrigin.company}
+   836→                    onToggle={() => toggleFavorite(sessionOrigin.company)}
+   837→                    size="size-8"
+   838→                    iconSize="size-4"
+   839→                  />
+   840→                  <Button
+   841→                    variant="ghost"
+   842→                    size="sm"
+   843→                    onClick={reshuffleCompany}
+   844→                    disabled={generating}
+   845→                    title="Reshuffles the behavioral picks"
+   846→                    aria-label="Shuffle again — reshuffles the behavioral picks"
+   847→                    className="text-muted-foreground hover:text-foreground"
+   848→                  >
+   849→                    {generating ? (
+   850→                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+   851→                    ) : (
+   852→                      <Shuffle className="size-3.5" aria-hidden="true" />
+   853→                    )}
+   854→                    Shuffle again
+   855→                  </Button>
+   856→                </div>
+   857→              </div>
+   858→              <p className="mt-3 flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs leading-relaxed text-emerald-800 dark:text-emerald-300">
+   859→                <Compass className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+   860→                <span>
+   861→                  <span className="font-semibold">Coach:</span> {STAGE_HINT[sessionOrigin.stage]}
+   862→                </span>
+   863→              </p>
+   864→            </motion.section>
+   865→          ) : null}
+   866→
+   867→          {/* ============ Practice controls bar ============ */}
+   868→          <motion.div
+   869→            variants={staggerItem}
+   870→            className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4"
+   871→          >
+   872→            <div className="flex flex-wrap items-center gap-3">
+   873→              <span className="font-display text-sm font-semibold tabular-nums">
+   874→                {practicedCount}/{totalCount} practiced
+   875→              </span>
+   876→              <div
+   877→                className="h-2 w-36 overflow-hidden rounded-full bg-muted"
+   878→                role="progressbar"
+   879→                aria-valuenow={pct}
+   880→                aria-valuemin={0}
+   881→                aria-valuemax={100}
+   882→                aria-label="Session progress"
+   883→              >
+   884→                <motion.div
+   885→                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500"
+   886→                  initial={false}
+   887→                  animate={{ width: `${pct}%` }}
+   888→                  transition={{ type: "spring", stiffness: 140, damping: 22 }}
+   889→                />
+   890→              </div>
+   891→              <span className="hidden text-xs text-muted-foreground sm:block">
+   892→                Flipping a card marks it practiced
+   893→                {tailoredCount > 0 ? ` · ${tailoredCount} tailored to you` : ""}
+   894→              </span>
+   895→            </div>
+   896→            <div className="flex items-center gap-2">
+   897→              {sessionOrigin?.kind !== "company" ? (
+   898→                <Button variant="outline" size="sm" onClick={generate} disabled={generating}>
+   899→                  <Shuffle className="size-3.5" aria-hidden="true" />
+   900→                  Shuffle again
+   901→                </Button>
+   902→              ) : null}
+   903→              <Button
+   904→                variant="outline"
+   905→                size="sm"
+   906→                onClick={() => openFocus(0)}
+   907→                disabled={generating}
+   908→              >
+   909→                <Focus className="size-3.5" aria-hidden="true" />
+   910→                Focus Mode
+   911→              </Button>
+   912→            </div>
+   913→          </motion.div>
+   914→
+   915→          {/* ============ Flashcards grid ============ */}
+   916→          <motion.div
+   917→            key={generation}
+   918→            variants={staggerContainer}
+   919→            initial="hidden"
+   920→            animate="show"
+   921→            className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3"
+   922→            aria-label="Question flashcards"
+   923→          >
+   924→            {session.map((q, i) => (
+   925→              <motion.div key={q.id} variants={staggerItem} className="h-full">
+   926→                <Flashcard
+   927→                  q={q}
+   928→                  index={i}
+   929→                  practiced={practicedIds.has(q.id)}
+   930→                  onPracticed={markPracticed}
+   931→                  className="h-full"
+   932→                />
+   933→              </motion.div>
+   934→            ))}
+   935→          </motion.div>
+   936→        </>
+   937→      ) : (
+   938→        /* ============ Empty state ============ */
+   939→        <motion.section
+   940→          variants={staggerItem}
+   941→          aria-label="No questions yet"
+   942→          className="flex flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed bg-muted/30 px-6 py-16 text-center"
+   943→        >
+   944→          <div className="relative" aria-hidden="true">
+   945→            <div className="flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/25">
+   946→              <GraduationCap className="size-8" />
+   947→            </div>
+   948→            <span className="absolute -right-3 -top-2 flex size-7 items-center justify-center rounded-full border bg-background text-amber-500 shadow-sm">
+   949→              <Brain className="size-3.5" />
+   950→            </span>
+   951→            <span className="absolute -bottom-2 -left-4 flex size-7 items-center justify-center rounded-full border bg-background text-violet-500 shadow-sm">
+   952→              <ListChecks className="size-3.5" />
+   953→            </span>
+   954→          </div>
+   955→          <div className="space-y-1.5">
+   956→            <h2 className="font-display text-xl font-semibold">
+   957→              Your question set appears here
+   958→            </h2>
+   959→            <p className="mx-auto max-w-md text-sm leading-relaxed text-muted-foreground">
+   960→              Choose your categories above, then generate a set of{" "}
+   961→              {QUESTIONS_PER_SET} flashcards with STAR model answers tailored to
+   962→              your experience.
+   963→            </p>
+   964→            {resume ? (
+   965→              <p className="text-xs text-muted-foreground">
+   966→                Generating from{" "}
+   967→                <span className="font-medium text-foreground">{resume.title}</span>
+   968→              </p>
+   969→            ) : null}
+   970→          </div>
+   971→          <Badge variant="outline" className="gap-1.5">
+   972→            <Sparkles className="size-3 text-violet-500" aria-hidden="true" />
+   973→            No two sessions are the same
+   974→          </Badge>
+   975→        </motion.section>
+   976→      )}
+   977→
+   978→      {/* ============ Tips panel ============ */}
+   979→      <TipsPanel />
+   980→
+   981→      {/* ============ Focus mode ============ */}
+   982→      {session ? (
+   983→        <FocusMode
+   984→          open={focusOpen}
+   985→          onOpenChange={setFocusOpen}
+   986→          questions={session}
+   987→          index={focusIndex}
+   988→          onIndexChange={setFocusIndex}
+   989→          practicedIds={practicedIds}
+   990→          onPracticed={markPracticed}
+   991→          notes={starNotes}
+   992→          onNotesChange={handleNotesChange}
+   993→        />
+   994→      ) : null}
+   995→    </motion.div>
+   996→  );
+   997→}
+   998→

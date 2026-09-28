@@ -1,0 +1,965 @@
+     1→"use client";
+     2→
+     3→import { create } from "zustand";
+     4→import { persist, createJSONStorage } from "zustand/middleware";
+     5→import { toast } from "sonner";
+     6→
+     7→/* ============================== Types ============================== */
+     8→
+     9→export type TemplateId =
+    10→  | "modern"
+    11→  | "classic"
+    12→  | "minimal"
+    13→  | "creative"
+    14→  | "executive"
+    15→  | "technical";
+    16→
+    17→export const TEMPLATE_META: Record<
+    18→  TemplateId,
+    19→  { name: string; description: string; tag: string }
+    20→> = {
+    21→  modern: {
+    22→    name: "Modern",
+    23→    description: "Two-column layout with a vibrant accent sidebar. Perfect for tech roles.",
+    24→    tag: "Most Popular",
+    25→  },
+    26→  classic: {
+    27→    name: "Classic",
+    28→    description: "Timeless single-column design trusted by recruiters for decades.",
+    29→    tag: "Safe Choice",
+    30→  },
+    31→  minimal: {
+    32→    name: "Minimal",
+    33→    description: "Ultra-clean whitespace-first layout that lets your content shine.",
+    34→    tag: "Clean",
+    35→  },
+    36→  creative: {
+    37→    name: "Creative",
+    38→    description: "Bold header block with skill chips for design-forward careers.",
+    39→    tag: "Bold",
+    40→  },
+    41→  executive: {
+    42→    name: "Executive",
+    43→    description: "Commanding dark header and refined typography for senior roles.",
+    44→    tag: "Senior",
+    45→  },
+    46→  technical: {
+    47→    name: "Technical",
+    48→    description: "Dense, keyword-rich engineering layout optimized for ATS parsing.",
+    49→    tag: "ATS-Ready",
+    50→  },
+    51→};
+    52→
+    53→export interface PersonalInfo {
+    54→  fullName: string;
+    55→  jobTitle: string;
+    56→  email: string;
+    57→  phone: string;
+    58→  location: string;
+    59→  website: string;
+    60→  linkedin: string;
+    61→  github: string;
+    62→}
+    63→
+    64→export interface ExperienceItem {
+    65→  id: string;
+    66→  company: string;
+    67→  role: string;
+    68→  location: string;
+    69→  startDate: string; // e.g. "2021-06"
+    70→  endDate: string;
+    71→  current: boolean;
+    72→  bullets: string[];
+    73→}
+    74→
+    75→export interface EducationItem {
+    76→  id: string;
+    77→  school: string;
+    78→  degree: string;
+    79→  field: string;
+    80→  startDate: string;
+    81→  endDate: string;
+    82→  gpa: string;
+    83→}
+    84→
+    85→export interface SkillItem {
+    86→  id: string;
+    87→  name: string;
+    88→  level: number; // 1..5
+    89→}
+    90→
+    91→export interface ProjectItem {
+    92→  id: string;
+    93→  name: string;
+    94→  url: string;
+    95→  description: string;
+    96→  tech: string[];
+    97→}
+    98→
+    99→export interface CertificationItem {
+   100→  id: string;
+   101→  name: string;
+   102→  issuer: string;
+   103→  year: string;
+   104→}
+   105→
+   106→export interface LanguageItem {
+   107→  id: string;
+   108→  name: string;
+   109→  level: string;
+   110→}
+   111→
+   112→export interface ResumeData {
+   113→  id: string;
+   114→  title: string;
+   115→  template: TemplateId;
+   116→  accent: string; // hex
+   117→  updatedAt: number;
+   118→  personal: PersonalInfo;
+   119→  summary: string;
+   120→  experience: ExperienceItem[];
+   121→  education: EducationItem[];
+   122→  skills: SkillItem[];
+   123→  projects: ProjectItem[];
+   124→  certifications: CertificationItem[];
+   125→  languages: LanguageItem[];
+   126→  /** Soft-hide flag (additive, optional): archived resumes stay in the store
+   127→      (and keep their score history) but drop out of the active list. Older
+   128→      persisted state without this field reads as NOT archived — always check
+   129→      !!resume.archived, never assume the key exists. */
+   130→  archived?: boolean;
+   131→}
+   132→
+   133→/** Snapshot of a deleted resume plus its position in the pre-delete array,
+   134→    captured so the Undo action on the delete toast can restore it exactly. */
+   135→export interface DeletedResumeEntry {
+   136→  resume: ResumeData;
+   137→  index: number;
+   138→}
+   139→
+   140→/* ============================== Helpers ============================== */
+   141→
+   142→export function uid(): string {
+   143→  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+   144→}
+   145→
+   146→export const ACCENT_PRESETS = [
+   147→  { name: "Emerald", value: "#10b981" },
+   148→  { name: "Teal", value: "#14b8a6" },
+   149→  { name: "Violet", value: "#8b5cf6" },
+   150→  { name: "Rose", value: "#f43f5e" },
+   151→  { name: "Amber", value: "#f59e0b" },
+   152→  { name: "Slate", value: "#475569" },
+   153→  { name: "Orange", value: "#f97316" },
+   154→  { name: "Fuchsia", value: "#d946ef" },
+   155→];
+   156→
+   157→export function formatMonth(value: string): string {
+   158→  if (!value) return "";
+   159→  const [y, m] = value.split("-");
+   160→  if (!y) return value;
+   161→  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+   162→  if (!m) return y;
+   163→  const idx = parseInt(m, 10) - 1;
+   164→  return `${months[idx] ?? ""} ${y}`;
+   165→}
+   166→
+   167→export function emptyResume(title = "Untitled Resume", template: TemplateId = "modern", accent = "#10b981"): ResumeData {
+   168→  return {
+   169→    id: uid(),
+   170→    title,
+   171→    template,
+   172→    accent,
+   173→    updatedAt: Date.now(),
+   174→    personal: {
+   175→      fullName: "",
+   176→      jobTitle: "",
+   177→      email: "",
+   178→      phone: "",
+   179→      location: "",
+   180→      website: "",
+   181→      linkedin: "",
+   182→      github: "",
+   183→    },
+   184→    summary: "",
+   185→    experience: [],
+   186→    education: [],
+   187→    skills: [],
+   188→    projects: [],
+   189→    certifications: [],
+   190→    languages: [],
+   191→  };
+   192→}
+   193→
+   194→/* ============================== Seed data ============================== */
+   195→
+   196→function seedResume1(): ResumeData {
+   197→  return {
+   198→    id: "seed-alex",
+   199→    title: "Senior Frontend Engineer — Google",
+   200→    template: "modern",
+   201→    accent: "#10b981",
+   202→    updatedAt: Date.now() - 1000 * 60 * 60 * 5,
+   203→    personal: {
+   204→      fullName: "Alexander Chen",
+   205→      jobTitle: "Senior Frontend Engineer",
+   206→      email: "alex.chen@email.com",
+   207→      phone: "+1 (415) 555-0132",
+   208→      location: "San Francisco, CA",
+   209→      website: "alexchen.dev",
+   210→      linkedin: "linkedin.com/in/alexchen",
+   211→      github: "github.com/alexchen",
+   212→    },
+   213→    summary:
+   214→      "Senior Frontend Engineer with 7+ years of experience architecting high-performance web applications used by 2M+ monthly users. Specialized in React, TypeScript, and design systems. Reduced page load times by 43% and led a team of 6 engineers shipping 30+ production features per quarter.",
+   215→    experience: [
+   216→      {
+   217→        id: uid(),
+   218→        company: "Nova Digital",
+   219→        role: "Senior Frontend Engineer",
+   220→        location: "San Francisco, CA",
+   221→        startDate: "2021-06",
+   222→        endDate: "",
+   223→        current: true,
+   224→        bullets: [
+   225→          "Led migration of a legacy AngularJS monolith to Next.js, improving Core Web Vitals scores by 43% and cutting bounce rate by 18%",
+   226→          "Architected a company-wide design system adopted by 5 product teams, reducing UI development time by 60%",
+   227→          "Mentored 6 junior engineers; 3 were promoted within 18 months",
+   228→          "Introduced automated accessibility testing that raised WCAG compliance from 71% to 98%",
+   229→        ],
+   230→      },
+   231→      {
+   232→        id: uid(),
+   233→        company: "PixelWorks",
+   234→        role: "Frontend Engineer",
+   235→        location: "Seattle, WA",
+   236→        startDate: "2018-03",
+   237→        endDate: "2021-05",
+   238→        current: false,
+   239→        bullets: [
+   240→          "Built a real-time collaboration dashboard serving 200K daily active users with 99.95% uptime",
+   241→          "Reduced bundle size by 38% through code-splitting and dependency audits",
+   242→          "Shipped 30+ customer-facing features across 12 product releases",
+   243→        ],
+   244→      },
+   245→      {
+   246→        id: uid(),
+   247→        company: "BrightLabs",
+   248→        role: "Web Developer",
+   249→        location: "Portland, OR",
+   250→        startDate: "2016-07",
+   251→        endDate: "2018-02",
+   252→        current: false,
+   253→        bullets: [
+   254→          "Developed responsive marketing sites that lifted lead conversion by 25%",
+   255→          "Automated image optimization pipeline saving 12 hours of manual work weekly",
+   256→        ],
+   257→      },
+   258→    ],
+   259→    education: [
+   260→      {
+   261→        id: uid(),
+   262→        school: "University of California, Berkeley",
+   263→        degree: "B.S.",
+   264→        field: "Computer Science",
+   265→        startDate: "2012-08",
+   266→        endDate: "2016-05",
+   267→        gpa: "3.8",
+   268→      },
+   269→    ],
+   270→    skills: [
+   271→      { id: uid(), name: "React", level: 5 },
+   272→      { id: uid(), name: "TypeScript", level: 5 },
+   273→      { id: uid(), name: "Next.js", level: 5 },
+   274→      { id: uid(), name: "Tailwind CSS", level: 4 },
+   275→      { id: uid(), name: "GraphQL", level: 4 },
+   276→      { id: uid(), name: "Node.js", level: 4 },
+   277→      { id: uid(), name: "Testing (Jest/RTL)", level: 4 },
+   278→      { id: uid(), name: "CI/CD", level: 3 },
+   279→    ],
+   280→    projects: [
+   281→      {
+   282→        id: uid(),
+   283→        name: "Design System Pro",
+   284→        url: "github.com/alexchen/design-system-pro",
+   285→        description: "Open-source React component library with 4.2K GitHub stars, used by 300+ projects.",
+   286→        tech: ["React", "TypeScript", "Storybook"],
+   287→      },
+   288→      {
+   289→        id: uid(),
+   290→        name: "Realtime Collab",
+   291→        url: "realtimecollab.app",
+   292→        description: "Multiplayer whiteboard with CRDT-based sync, handling 10K concurrent sessions.",
+   293→        tech: ["WebSockets", "CRDT", "Canvas API"],
+   294→      },
+   295→    ],
+   296→    certifications: [
+   297→      { id: uid(), name: "AWS Certified Developer", issuer: "Amazon Web Services", year: "2023" },
+   298→      { id: uid(), name: "Professional Scrum Master I", issuer: "Scrum.org", year: "2022" },
+   299→    ],
+   300→    languages: [
+   301→      { id: uid(), name: "English", level: "Native" },
+   302→      { id: uid(), name: "Mandarin", level: "Fluent" },
+   303→    ],
+   304→  };
+   305→}
+   306→
+   307→function seedResume2(): ResumeData {
+   308→  return {
+   309→    id: "seed-maya",
+   310→    title: "Product Manager — Stripe",
+   311→    template: "executive",
+   312→    accent: "#f59e0b",
+   313→    updatedAt: Date.now() - 1000 * 60 * 60 * 26,
+   314→    personal: {
+   315→      fullName: "Maya Rodriguez",
+   316→      jobTitle: "Senior Product Manager",
+   317→      email: "maya.rodriguez@email.com",
+   318→      phone: "+1 (212) 555-0184",
+   319→      location: "New York, NY",
+   320→      website: "mayarodriguez.co",
+   321→      linkedin: "linkedin.com/in/mayarodriguez",
+   322→      github: "",
+   323→    },
+   324→    summary:
+   325→      "Results-driven Product Manager with 8 years of experience scaling fintech products from zero to $40M ARR. Expert in data-led discovery, experimentation, and cross-functional leadership across teams of 25+.",
+   326→    experience: [
+   327→      {
+   328→        id: uid(),
+   329→        company: "PayFlow",
+   330→        role: "Senior Product Manager",
+   331→        location: "New York, NY",
+   332→        startDate: "2020-01",
+   333→        endDate: "",
+   334→        current: true,
+   335→        bullets: [
+   336→          "Owned payments checkout product generating $40M ARR; grew conversion 22% through 60+ A/B tests",
+   337→          "Launched instant payouts feature in 3 months, capturing 15% market share in first year",
+   338→          "Managed roadmap across 4 squads (25 engineers/designers) using OKR framework",
+   339→        ],
+   340→      },
+   341→      {
+   342→        id: uid(),
+   343→        company: "CommerceOS",
+   344→        role: "Product Manager",
+   345→        location: "Boston, MA",
+   346→        startDate: "2016-09",
+   347→        endDate: "2019-12",
+   348→        current: false,
+   349→        bullets: [
+   350→          "Scaled merchant analytics platform from 5K to 80K active merchants",
+   351→          "Defined north-star metrics adopted company-wide, aligning 3 business units",
+   352→        ],
+   353→      },
+   354→    ],
+   355→    education: [
+   356→      {
+   357→        id: uid(),
+   358→        school: "Columbia University",
+   359→        degree: "MBA",
+   360→        field: "Business Administration",
+   361→        startDate: "2014-08",
+   362→        endDate: "2016-05",
+   363→        gpa: "",
+   364→      },
+   365→      {
+   366→        id: uid(),
+   367→        school: "Boston University",
+   368→        degree: "B.A.",
+   369→        field: "Economics",
+   370→        startDate: "2010-08",
+   371→        endDate: "2014-05",
+   372→        gpa: "3.7",
+   373→      },
+   374→    ],
+   375→    skills: [
+   376→      { id: uid(), name: "Product Strategy", level: 5 },
+   377→      { id: uid(), name: "A/B Testing", level: 5 },
+   378→      { id: uid(), name: "SQL", level: 4 },
+   379→      { id: uid(), name: "Roadmapping", level: 5 },
+   380→      { id: uid(), name: "Figma", level: 4 },
+   381→      { id: uid(), name: "Stakeholder Mgmt", level: 5 },
+   382→    ],
+   383→    projects: [],
+   384→    certifications: [{ id: uid(), name: "Certified Scrum Product Owner", issuer: "Scrum Alliance", year: "2021" }],
+   385→    languages: [
+   386→      { id: uid(), name: "English", level: "Native" },
+   387→      { id: uid(), name: "Spanish", level: "Native" },
+   388→    ],
+   389→  };
+   390→}
+   391→
+   392→function seedResume3(): ResumeData {
+   393→  return {
+   394→    id: "seed-david",
+   395→    title: "Data Scientist — OpenAI",
+   396→    template: "technical",
+   397→    accent: "#8b5cf6",
+   398→    updatedAt: Date.now() - 1000 * 60 * 60 * 50,
+   399→    personal: {
+   400→      fullName: "David Kim",
+   401→      jobTitle: "Data Scientist",
+   402→      email: "david.kim@email.com",
+   403→      phone: "+1 (206) 555-0177",
+   404→      location: "Seattle, WA",
+   405→      website: "davidkim.ai",
+   406→      linkedin: "linkedin.com/in/davidkim",
+   407→      github: "github.com/davidkim",
+   408→    },
+   409→    summary:
+   410→      "Data Scientist with 5 years of experience in machine learning and large-scale data pipelines. Deployed models serving 10M+ daily predictions and reduced inference costs by 35%.",
+   411→    experience: [
+   412→      {
+   413→        id: uid(),
+   414→        company: "CloudMetrics",
+   415→        role: "Data Scientist",
+   416→        location: "Seattle, WA",
+   417→        startDate: "2021-02",
+   418→        endDate: "",
+   419→        current: true,
+   420→        bullets: [
+   421→          "Built churn-prediction ensemble (XGBoost + neural nets) saving $2.3M annually in retained revenue",
+   422→          "Designed feature store on Spark processing 4TB daily with sub-hour freshness",
+   423→          "Reduced model inference costs 35% via distillation and ONNX runtime optimization",
+   424→        ],
+   425→      },
+   426→      {
+   427→        id: uid(),
+   428→        company: "InsightEngine",
+   429→        role: "ML Engineer",
+   430→        location: "Remote",
+   431→        startDate: "2019-06",
+   432→        endDate: "2021-01",
+   433→        current: false,
+   434→        bullets: [
+   435→          "Deployed NLP classification pipeline (BERT fine-tuning) reaching 94% F1 across 12 languages",
+   436→          "Automated retraining workflows cutting model refresh cycle from 2 weeks to 2 days",
+   437→        ],
+   438→      },
+   439→    ],
+   440→    education: [
+   441→      {
+   442→        id: uid(),
+   443→        school: "University of Washington",
+   444→        degree: "M.S.",
+   445→        field: "Statistics",
+   446→        startDate: "2017-08",
+   447→        endDate: "2019-05",
+   448→        gpa: "3.9",
+   449→      },
+   450→    ],
+   451→    skills: [
+   452→      { id: uid(), name: "Python", level: 5 },
+   453→      { id: uid(), name: "PyTorch", level: 5 },
+   454→      { id: uid(), name: "SQL", level: 5 },
+   455→      { id: uid(), name: "Spark", level: 4 },
+   456→      { id: uid(), name: "XGBoost", level: 4 },
+   457→      { id: uid(), name: "Docker/K8s", level: 4 },
+   458→      { id: uid(), name: "AWS", level: 4 },
+   459→      { id: uid(), name: "Airflow", level: 3 },
+   460→    ],
+   461→    projects: [
+   462→      {
+   463→        id: uid(),
+   464→        name: "ForecastBench",
+   465→        url: "github.com/davidkim/forecastbench",
+   466→        description: "Time-series benchmarking toolkit with 1.1K GitHub stars and 40+ model implementations.",
+   467→        tech: ["Python", "Prophet", "MLflow"],
+   468→      },
+   469→    ],
+   470→    certifications: [{ id: uid(), name: "Google Cloud Professional ML Engineer", issuer: "Google Cloud", year: "2023" }],
+   471→    languages: [
+   472→      { id: uid(), name: "English", level: "Fluent" },
+   473→      { id: uid(), name: "Korean", level: "Native" },
+   474→    ],
+   475→  };
+   476→}
+   477→
+   478→/* ============================== Job Applications ============================== */
+   479→
+   480→export type ApplicationStage = "saved" | "applied" | "interview" | "offer" | "rejected";
+   481→
+   482→export const STAGE_META: Record<
+   483→  ApplicationStage,
+   484→  { label: string; color: string; tint: string; icon: string }
+   485→> = {
+   486→  saved: { label: "Saved", color: "#78716c", tint: "#78716c14", icon: "Bookmark" },
+   487→  applied: { label: "Applied", color: "#8b5cf6", tint: "#8b5cf614", icon: "Send" },
+   488→  interview: { label: "Interview", color: "#f59e0b", tint: "#f59e0b14", icon: "Users" },
+   489→  offer: { label: "Offer", color: "#10b981", tint: "#10b98114", icon: "Trophy" },
+   490→  rejected: { label: "Rejected", color: "#f43f5e", tint: "#f43f5e14", icon: "XCircle" },
+   491→};
+   492→
+   493→export interface JobApplication {
+   494→  id: string;
+   495→  company: string;
+   496→  role: string;
+   497→  location: string;
+   498→  salary: string;
+   499→  url: string;
+   500→  stage: ApplicationStage;
+   501→  resumeId: string; // resume used to apply ("" = none)
+   502→  notes: string;
+   503→  appliedAt: number; // epoch ms when added
+   504→  updatedAt: number;
+   505→}
+   506→
+   507→export interface ScoreEntry {
+   508→  id: string;
+   509→  resumeId: string;
+   510→  resumeTitle: string;
+   511→  score: number;
+   512→  at: number; // epoch ms
+   513→  /** Optional per-category sub-scores (0–100), keyed by breakdown label
+   514→      (e.g. "Keywords", "Impact", "Formatting"). Older entries omit it. */
+   515→  categories?: Record<string, number>;
+   516→}
+   517→
+   518→function seedApplications(): JobApplication[] {
+   519→  const now = Date.now();
+   520→  const day = 1000 * 60 * 60 * 24;
+   521→  return [
+   522→    {
+   523→      id: uid(),
+   524→      company: "Vercel",
+   525→      role: "Senior Frontend Engineer",
+   526→      location: "Remote",
+   527→      salary: "$180K – $220K",
+   528→      url: "vercel.com/careers",
+   529→      stage: "interview",
+   530→      resumeId: "seed-alex",
+   531→      notes: "Technical interview scheduled — review React Server Components & rendering patterns.",
+   532→      appliedAt: now - day * 9,
+   533→      updatedAt: now - day * 1,
+   534→    },
+   535→    {
+   536→      id: uid(),
+   537→      company: "Linear",
+   538→      role: "Product Engineer",
+   539→      location: "Remote",
+   540→      salary: "$160K – $200K",
+   541→      url: "linear.app/careers",
+   542→      stage: "applied",
+   543→      resumeId: "seed-alex",
+   544→      notes: "Referred by a friend on the design team.",
+   545→      appliedAt: now - day * 4,
+   546→      updatedAt: now - day * 4,
+   547→    },
+   548→    {
+   549→      id: uid(),
+   550→      company: "Stripe",
+   551→      role: "Senior Product Manager",
+   552→      location: "New York, NY",
+   553→      salary: "$190K – $240K",
+   554→      url: "stripe.com/jobs",
+   555→      stage: "offer",
+   556→      resumeId: "seed-maya",
+   557→      notes: "Verbal offer received — negotiating equity. Deadline Friday.",
+   558→      appliedAt: now - day * 21,
+   559→      updatedAt: now - day * 2,
+   560→    },
+   561→    {
+   562→      id: uid(),
+   563→      company: "Notion",
+   564→      role: "Senior Frontend Engineer",
+   565→      location: "San Francisco, CA (Hybrid)",
+   566→      salary: "$170K – $210K",
+   567→      url: "notion.so/careers",
+   568→      stage: "saved",
+   569→      resumeId: "seed-alex",
+   570→      notes: "Tailor resume bullets toward collaborative editing / realtime sync.",
+   571→      appliedAt: now - day * 2,
+   572→      updatedAt: now - day * 2,
+   573→    },
+   574→    {
+   575→      id: uid(),
+   576→      company: "Anthropic",
+   577→      role: "Data Scientist, Applied",
+   578→      location: "Remote",
+   579→      salary: "$200K – $275K",
+   580→      url: "anthropic.com/careers",
+   581→      stage: "applied",
+   582→      resumeId: "seed-david",
+   583→      notes: "Emphasize eval methodology + LLM fine-tuning experience.",
+   584→      appliedAt: now - day * 6,
+   585→      updatedAt: now - day * 3,
+   586→    },
+   587→    {
+   588→      id: uid(),
+   589→      company: "Figma",
+   590→      role: "Senior Frontend Engineer",
+   591→      location: "Remote",
+   592→      salary: "$185K – $230K",
+   593→      url: "figma.com/careers",
+   594→      stage: "rejected",
+   595→      resumeId: "seed-alex",
+   596→      notes: "Passed on role — keep in touch with recruiter for Q3 openings.",
+   597→      appliedAt: now - day * 30,
+   598→      updatedAt: now - day * 12,
+   599→    },
+   600→  ];
+   601→}
+   602→
+   603→function seedScoreHistory(): ScoreEntry[] {
+   604→  const now = Date.now();
+   605→  const day = 1000 * 60 * 60 * 24;
+   606→  const mk = (resumeId: string, resumeTitle: string, score: number, daysAgo: number): ScoreEntry => ({
+   607→    id: uid(),
+   608→    resumeId,
+   609→    resumeTitle,
+   610→    score,
+   611→    at: now - day * daysAgo,
+   612→  });
+   613→  return [
+   614→    mk("seed-alex", "Senior Frontend Engineer — Google", 71, 20),
+   615→    mk("seed-alex", "Senior Frontend Engineer — Google", 78, 14),
+   616→    mk("seed-maya", "Product Manager — Stripe", 74, 11),
+   617→    mk("seed-alex", "Senior Frontend Engineer — Google", 82, 9),
+   618→    mk("seed-david", "Data Scientist — OpenAI", 80, 7),
+   619→    mk("seed-maya", "Product Manager — Stripe", 80, 5),
+   620→    mk("seed-david", "Data Scientist — OpenAI", 86, 3),
+   621→    mk("seed-alex", "Senior Frontend Engineer — Google", 87, 1),
+   622→  ];
+   623→}
+   624→
+   625→/* ============================== Undo buffer (module-local, NOT persisted) ============================== */
+   626→
+   627→/* Captures the most recent delete action so the Undo button on the delete
+   628→   toast can put the resumes back exactly where they were. Deliberately kept
+   629→   OUTSIDE the persisted store: undo data is transient and must never reach
+   630→   localStorage or widen the persisted schema. */
+   631→let undoBuffer: DeletedResumeEntry[] = [];
+   632→let undoBatchIds: string[] = [];
+   633→let undoBatchSealed = false;
+   634→
+   635→/* deleteResume may fire several times for ONE user action (multi-select
+   636→   delete loops over the selected ids). Calls made within the same synchronous
+   637→   task share one batch: the first call snapshots the pre-delete id order so
+   638→   every captured entry keeps its ORIGINAL position even though the array
+   639→   shrinks between calls; the next task starts a fresh batch. */
+   640→function openUndoBatch(): void {
+   641→  if (undoBatchSealed) return;
+   642→  undoBuffer = [];
+   643→  undoBatchIds = useResumeStore.getState().resumes.map((r) => r.id);
+   644→  undoBatchSealed = true;
+   645→  queueMicrotask(() => {
+   646→    undoBatchSealed = false;
+   647→  });
+   648→}
+   649→
+   650→/** Returns (and clears) the snapshots captured for the most recent delete
+   651→    action. Feed the result straight into showDeleteUndoToast. */
+   652→export function takeUndoEntries(): DeletedResumeEntry[] {
+   653→  const entries = undoBuffer;
+   654→  undoBuffer = [];
+   655→  return entries;
+   656→}
+   657→
+   658→/** Standard "deleted" toast with a 7s Undo action that restores the given
+   659→    entries at their original positions (restoreResumes). */
+   660→export function showDeleteUndoToast(entries: DeletedResumeEntry[]): void {
+   661→  const n = entries.length;
+   662→  if (n === 0) return;
+   663→  toast.success(n === 1 ? "Resume deleted" : `Deleted ${n} resumes`, {
+   664→    description:
+   665→      n === 1
+   666→        ? `“${entries[0]!.resume.title}” was removed from your workspace.`
+   667→        : `${n} resumes were removed from your workspace.`,
+   668→    duration: 7000,
+   669→    action: {
+   670→      label: "Undo",
+   671→      onClick: () => {
+   672→        useResumeStore.getState().restoreResumes(entries);
+   673→        toast.success(n === 1 ? "Resume restored" : `Restored ${n} resumes`, {
+   674→          description: n === 1 ? "Back at its original position." : "Back at their original positions.",
+   675→        });
+   676→      },
+   677→    },
+   678→  });
+   679→}
+   680→
+   681→/* ============================== Store ============================== */
+   682→
+   683→interface ResumeState {
+   684→  resumes: ResumeData[];
+   685→  activeResumeId: string;
+   686→  coverLetterCount: number;
+   687→  applications: JobApplication[];
+   688→  scoreHistory: ScoreEntry[];
+   689→  createResume: (title?: string, template?: TemplateId, accent?: string) => string;
+   690→  duplicateResume: (id: string) => string | undefined;
+   691→  deleteResume: (id: string) => void;
+   692→  /** Soft-hide: keeps the resume in the store but flags it archived. */
+   693→  archiveResume: (id: string) => void;
+   694→  /** Reverse of archiveResume — clears the archived flag. */
+   695→  unarchiveResume: (id: string) => void;
+   696→  /** Batch archive/unarchive for the resume select-mode bulk toolbar.
+   697→      Idempotent per resume: flags already in the target state are left so
+   698→      their updatedAt is untouched. */
+   699→  bulkSetArchived: (ids: string[], archived: boolean) => void;
+   700→  /** Splices previously deleted resumes back at their original positions
+   701→      (used by the Undo action on delete toasts). Idempotent: entries whose id
+   702→      is already present are skipped. */
+   703→  restoreResumes: (entries: DeletedResumeEntry[]) => void;
+   704→  setActive: (id: string) => void;
+   705→  updateResume: (id: string, patch: Partial<ResumeData>) => void;
+   706→  resetAll: () => void;
+   707→  /** Validates a parsed backup payload and replaces the workspace with it. Returns the number of resumes imported, or -1 if the payload is invalid. */
+   708→  importData: (payload: unknown) => number;
+   709→  incrementCoverLetters: () => void;
+   710→  addApplication: (app: Omit<JobApplication, "id" | "appliedAt" | "updatedAt">) => string;
+   711→  updateApplication: (id: string, patch: Partial<JobApplication>) => void;
+   712→  moveApplication: (id: string, stage: ApplicationStage) => void;
+   713→  deleteApplication: (id: string) => void;
+   714→  logScore: (
+   715→    resumeId: string,
+   716→    resumeTitle: string,
+   717→    score: number,
+   718→    categories?: Record<string, number>
+   719→  ) => void;
+   720→}
+   721→
+   722→export const useResumeStore = create<ResumeState>()(
+   723→  persist(
+   724→    (set, get) => ({
+   725→      resumes: [seedResume1(), seedResume2(), seedResume3()],
+   726→      activeResumeId: "seed-alex",
+   727→      coverLetterCount: 2,
+   728→      applications: seedApplications(),
+   729→      scoreHistory: seedScoreHistory(),
+   730→      createResume: (title, template, accent) => {
+   731→        const id = uid();
+   732→        const base = emptyResume(title ?? "Untitled Resume", template ?? "modern", accent ?? "#10b981");
+   733→        const resume: ResumeData = { ...base, id, updatedAt: Date.now() };
+   734→        set((s) => ({ resumes: [resume, ...s.resumes], activeResumeId: id }));
+   735→        return id;
+   736→      },
+   737→      duplicateResume: (id) => {
+   738→        const src = get().resumes.find((r) => r.id === id);
+   739→        if (!src) return undefined;
+   740→        const newId = uid();
+   741→        const copy: ResumeData = {
+   742→          ...structuredClone(src),
+   743→          id: newId,
+   744→          title: `${src.title} (Copy)`,
+   745→          updatedAt: Date.now(),
+   746→          /* Copies always start life in the active list, even if the source was archived. */
+   747→          archived: false,
+   748→        };
+   749→        set((s) => ({ resumes: [copy, ...s.resumes] }));
+   750→        return newId;
+   751→      },
+   752→      deleteResume: (id) => {
+   753→        const s = get();
+   754→        const index = s.resumes.findIndex((r) => r.id === id);
+   755→        if (index === -1) return;
+   756→        /* Capture BEFORE removal (deep copy + original position, anchored to
+   757→           the batch's pre-delete order) so the Undo toast can restore it. */
+   758→        openUndoBatch();
+   759→        const batchIndex = undoBatchIds.indexOf(id);
+   760→        undoBuffer.push({
+   761→          resume: structuredClone(s.resumes[index]!),
+   762→          index: batchIndex !== -1 ? batchIndex : index,
+   763→        });
+   764→        const resumes = s.resumes.filter((r) => r.id !== id);
+   765→        set({
+   766→          resumes,
+   767→          activeResumeId:
+   768→            s.activeResumeId === id ? (resumes[0]?.id ?? "") : s.activeResumeId,
+   769→        });
+   770→      },
+   771→      /* Archive bumps updatedAt like every other mutation (store convention).
+   772→         The active pointer is intentionally left untouched when archiving the
+   773→         active resume — it still resolves (the resume stays in the store), so
+   774→         the builder/ATS binding never breaks. */
+   775→      archiveResume: (id) =>
+   776→        set((s) => ({
+   777→          resumes: s.resumes.map((r) =>
+   778→            r.id === id ? { ...r, archived: true, updatedAt: Date.now() } : r
+   779→          ),
+   780→        })),
+   781→      unarchiveResume: (id) =>
+   782→        set((s) => ({
+   783→          resumes: s.resumes.map((r) =>
+   784→            r.id === id ? { ...r, archived: false, updatedAt: Date.now() } : r
+   785→          ),
+   786→        })),
+   787→      bulkSetArchived: (ids, archived) =>
+   788→        set((s) => {
+   789→          const wanted = new Set(ids);
+   790→          return {
+   791→            resumes: s.resumes.map((r) =>
+   792→              wanted.has(r.id) && r.archived !== archived
+   793→                ? { ...r, archived, updatedAt: Date.now() }
+   794→                : r
+   795→            ),
+   796→          };
+   797→        }),
+   798→      restoreResumes: (entries) =>
+   799→        set((s) => {
+   800→          const resumes = [...s.resumes];
+   801→          const present = new Set(resumes.map((r) => r.id));
+   802→          /* Splice in descending index order so every entry lands exactly
+   803→             where it came from, regardless of how many were removed. */
+   804→          const ordered = [...entries].sort((a, b) => b.index - a.index);
+   805→          for (const entry of ordered) {
+   806→            if (present.has(entry.resume.id)) continue;
+   807→            const at = Math.min(Math.max(entry.index, 0), resumes.length);
+   808→            resumes.splice(at, 0, structuredClone(entry.resume));
+   809→            present.add(entry.resume.id);
+   810→          }
+   811→          return { resumes };
+   812→        }),
+   813→      setActive: (id) => set({ activeResumeId: id }),
+   814→      updateResume: (id, patch) =>
+   815→        set((s) => ({
+   816→          resumes: s.resumes.map((r) =>
+   817→            r.id === id ? { ...r, ...patch, updatedAt: Date.now() } : r
+   818→          ),
+   819→        })),
+   820→      resetAll: () =>
+   821→        set({
+   822→          resumes: [seedResume1(), seedResume2(), seedResume3()],
+   823→          activeResumeId: "seed-alex",
+   824→          coverLetterCount: 2,
+   825→          applications: seedApplications(),
+   826→          scoreHistory: seedScoreHistory(),
+   827→        }),
+   828→      importData: (payload) => {
+   829→        if (!payload || typeof payload !== "object" || Array.isArray(payload)) return -1;
+   830→        const raw = payload as Record<string, unknown>;
+   831→
+   832→        /* Resumes are required — every entry needs an id, a title and a personal object. */
+   833→        const rawResumes = raw.resumes;
+   834→        if (!Array.isArray(rawResumes) || rawResumes.length === 0) return -1;
+   835→        const blank = emptyResume();
+   836→        const resumes: ResumeData[] = [];
+   837→        for (const entry of rawResumes) {
+   838→          if (!entry || typeof entry !== "object" || Array.isArray(entry)) return -1;
+   839→          const r = entry as Record<string, unknown>;
+   840→          if (typeof r.id !== "string" || r.id.trim() === "") return -1;
+   841→          if (typeof r.title !== "string") return -1;
+   842→          if (!r.personal || typeof r.personal !== "object" || Array.isArray(r.personal)) return -1;
+   843→          const copy = structuredClone(entry) as ResumeData;
+   844→          copy.template = typeof r.template === "string" && r.template in TEMPLATE_META ? (r.template as TemplateId) : blank.template;
+   845→          copy.accent = typeof r.accent === "string" && r.accent.trim() !== "" ? r.accent : blank.accent;
+   846→          copy.summary = typeof r.summary === "string" ? r.summary : blank.summary;
+   847→          copy.personal = { ...blank.personal, ...(r.personal as Partial<PersonalInfo>) };
+   848→          for (const key of ["experience", "education", "skills", "projects", "certifications", "languages"] as const) {
+   849→            if (!Array.isArray(copy[key])) copy[key] = [];
+   850→          }
+   851→          copy.updatedAt = typeof r.updatedAt === "number" && Number.isFinite(r.updatedAt) ? r.updatedAt : Date.now();
+   852→          resumes.push(copy);
+   853→        }
+   854→
+   855→        /* Active resume falls back to the first import if the id is missing or unknown. */
+   856→        const wantedActive = typeof raw.activeResumeId === "string" ? raw.activeResumeId : "";
+   857→        const firstId = resumes[0]!.id;
+   858→        const activeResumeId = resumes.some((r) => r.id === wantedActive) ? wantedActive : firstId;
+   859→
+   860→        const coverLetterCount =
+   861→          typeof raw.coverLetterCount === "number" && Number.isFinite(raw.coverLetterCount)
+   862→            ? Math.max(0, Math.round(raw.coverLetterCount))
+   863→            : 0;
+   864→
+   865→        /* Applications and score history fall back to seeds when absent (mirrors resetAll). */
+   866→        let applications = seedApplications();
+   867→        if (Array.isArray(raw.applications)) {
+   868→          const clean: JobApplication[] = [];
+   869→          for (const entry of raw.applications) {
+   870→            if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+   871→            const a = entry as Record<string, unknown>;
+   872→            clean.push({
+   873→              id: typeof a.id === "string" && a.id !== "" ? a.id : uid(),
+   874→              company: typeof a.company === "string" ? a.company : "",
+   875→              role: typeof a.role === "string" ? a.role : "",
+   876→              location: typeof a.location === "string" ? a.location : "",
+   877→              salary: typeof a.salary === "string" ? a.salary : "",
+   878→              url: typeof a.url === "string" ? a.url : "",
+   879→              stage: typeof a.stage === "string" && a.stage in STAGE_META ? (a.stage as ApplicationStage) : "applied",
+   880→              resumeId: typeof a.resumeId === "string" ? a.resumeId : "",
+   881→              notes: typeof a.notes === "string" ? a.notes : "",
+   882→              appliedAt: typeof a.appliedAt === "number" && Number.isFinite(a.appliedAt) ? a.appliedAt : Date.now(),
+   883→              updatedAt: typeof a.updatedAt === "number" && Number.isFinite(a.updatedAt) ? a.updatedAt : Date.now(),
+   884→            });
+   885→          }
+   886→          if (clean.length > 0) applications = clean;
+   887→        }
+   888→
+   889→        let scoreHistory = seedScoreHistory();
+   890→        if (Array.isArray(raw.scoreHistory)) {
+   891→          const clean: ScoreEntry[] = [];
+   892→          for (const entry of raw.scoreHistory) {
+   893→            if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+   894→            const e = entry as Record<string, unknown>;
+   895→            if (typeof e.score !== "number" || !Number.isFinite(e.score)) continue;
+   896→            clean.push({
+   897→              id: typeof e.id === "string" && e.id !== "" ? e.id : uid(),
+   898→              resumeId: typeof e.resumeId === "string" ? e.resumeId : "",
+   899→              resumeTitle: typeof e.resumeTitle === "string" ? e.resumeTitle : "Untitled",
+   900→              score: e.score,
+   901→              at: typeof e.at === "number" && Number.isFinite(e.at) ? e.at : Date.now(),
+   902→            });
+   903→          }
+   904→          if (clean.length > 0) scoreHistory = clean.slice(-60);
+   905→        }
+   906→
+   907→        set({ resumes, activeResumeId, coverLetterCount, applications, scoreHistory });
+   908→        return resumes.length;
+   909→      },
+   910→      incrementCoverLetters: () => set((s) => ({ coverLetterCount: s.coverLetterCount + 1 })),
+   911→      addApplication: (app) => {
+   912→        const id = uid();
+   913→        const full: JobApplication = {
+   914→          ...app,
+   915→          id,
+   916→          appliedAt: Date.now(),
+   917→          updatedAt: Date.now(),
+   918→        };
+   919→        set((s) => ({ applications: [full, ...s.applications] }));
+   920→        return id;
+   921→      },
+   922→      updateApplication: (id, patch) =>
+   923→        set((s) => ({
+   924→          applications: s.applications.map((a) =>
+   925→            a.id === id ? { ...a, ...patch, updatedAt: Date.now() } : a
+   926→          ),
+   927→        })),
+   928→      moveApplication: (id, stage) =>
+   929→        set((s) => ({
+   930→          applications: s.applications.map((a) =>
+   931→            a.id === id ? { ...a, stage, updatedAt: Date.now() } : a
+   932→          ),
+   933→        })),
+   934→      deleteApplication: (id) =>
+   935→        set((s) => ({ applications: s.applications.filter((a) => a.id !== id) })),
+   936→      logScore: (resumeId, resumeTitle, score, categories) =>
+   937→        set((s) => ({
+   938→          scoreHistory: [
+   939→            ...s.scoreHistory,
+   940→            { id: uid(), resumeId, resumeTitle, score, at: Date.now(), categories },
+   941→          ].slice(-60),
+   942→        })),
+   943→    }),
+   944→    {
+   945→      name: "resumeforge-store",
+   946→      storage: createJSONStorage(() => localStorage),
+   947→      // Rehydrate AFTER React hydration (see <StoreRehydrator /> in root layout).
+   948→      // Synchronous rehydration makes the first client render read localStorage
+   949→      // while the server rendered seed data — any divergence (extra resumes,
+   950→      // archived flags, renamed profile…) shifts the render tree and breaks
+   951→      // hydration (Radix useId mismatches on every dashboard route).
+   952→      skipHydration: true,
+   953→    }
+   954→  )
+   955→);
+   956→
+   957→/* Convenience selectors */
+   958→export function useActiveResume(): ResumeData | undefined {
+   959→  return useResumeStore((s) => s.resumes.find((r) => r.id === s.activeResumeId));
+   960→}
+   961→
+   962→export function useGetResume() {
+   963→  return (id: string) => useResumeStore.getState().resumes.find((r) => r.id === id);
+   964→}
+   965→

@@ -1,0 +1,723 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import Link from "next/link";
+     5→import { usePathname, useRouter } from "next/navigation";
+     6→import { useTheme } from "next-themes";
+     7→import { formatDistanceToNow } from "date-fns";
+     8→import { useResumeStore, type ScoreEntry } from "@/lib/resume-store";
+     9→import { cn } from "@/lib/utils";
+    10→import { Button } from "@/components/ui/button";
+    11→import {
+    12→  CommandDialog,
+    13→  CommandEmpty,
+    14→  CommandGroup,
+    15→  CommandInput,
+    16→  CommandItem,
+    17→  CommandList,
+    18→  CommandSeparator,
+    19→} from "@/components/ui/command";
+    20→import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+    21→import {
+    22→  DropdownMenu,
+    23→  DropdownMenuContent,
+    24→  DropdownMenuItem,
+    25→  DropdownMenuLabel,
+    26→  DropdownMenuSeparator,
+    27→  DropdownMenuTrigger,
+    28→} from "@/components/ui/dropdown-menu";
+    29→import {
+    30→  Tooltip,
+    31→  TooltipContent,
+    32→  TooltipProvider,
+    33→  TooltipTrigger,
+    34→} from "@/components/ui/tooltip";
+    35→import {
+    36→  LayoutDashboard,
+    37→  FileText,
+    38→  PenLine,
+    39→  LayoutTemplate,
+    40→  GitCompareArrows,
+    41→  Target,
+    42→  SpellCheck,
+    43→  Mail,
+    44→  Globe,
+    45→  Linkedin,
+    46→  Settings,
+    47→  Search,
+    48→  Bell,
+    49→  Sun,
+    50→  Moon,
+    51→  Menu,
+    52→  Sparkles,
+    53→  Plus,
+    54→  LogOut,
+    55→  User,
+    56→  Zap,
+    57→  Briefcase,
+    58→  MessagesSquare,
+    59→  TrendingUp,
+    60→  TrendingDown,
+    61→  Trophy,
+    62→  Users,
+    63→  XCircle,
+    64→  CheckCheck,
+    65→} from "lucide-react";
+    66→
+    67→/* ------------------------------------------------------------------ */
+    68→/* Notifications — derived from the store (score history + pipeline)   */
+    69→/* ------------------------------------------------------------------ */
+    70→
+    71→type NotificationKind =
+    72→  | "score-up"
+    73→  | "score-down"
+    74→  | "interview"
+    75→  | "offer"
+    76→  | "rejected"
+    77→  | "resume";
+    78→
+    79→interface NotificationItem {
+    80→  id: string;
+    81→  kind: NotificationKind;
+    82→  title: string;
+    83→  body: string;
+    84→  at: number;
+    85→  href: string;
+    86→}
+    87→
+    88→const NOTIF_META: Record<
+    89→  NotificationKind,
+    90→  { icon: React.ComponentType<{ className?: string }>; tint: string; label: string }
+    91→> = {
+    92→  "score-up": {
+    93→    icon: TrendingUp,
+    94→    tint: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
+    95→    label: "Score up",
+    96→  },
+    97→  "score-down": {
+    98→    icon: TrendingDown,
+    99→    tint: "bg-rose-500/12 text-rose-600 dark:text-rose-400",
+   100→    label: "Score down",
+   101→  },
+   102→  interview: {
+   103→    icon: Users,
+   104→    tint: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
+   105→    label: "Interview",
+   106→  },
+   107→  offer: {
+   108→    icon: Trophy,
+   109→    tint: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
+   110→    label: "Offer",
+   111→  },
+   112→  rejected: {
+   113→    icon: XCircle,
+   114→    tint: "bg-zinc-500/12 text-zinc-600 dark:text-zinc-400",
+   115→    label: "Closed",
+   116→  },
+   117→  resume: {
+   118→    icon: FileText,
+   119→    tint: "bg-violet-500/12 text-violet-600 dark:text-violet-400",
+   120→    label: "Resume",
+   121→  },
+   122→};
+   123→
+   124→const NOTIFS_READ_KEY = "resumeforge-notifs-read";
+   125→
+   126→function readNotifsLastRead(): number {
+   127→  try {
+   128→    return Number(localStorage.getItem(NOTIFS_READ_KEY)) || 0;
+   129→  } catch {
+   130→    return 0;
+   131→  }
+   132→}
+   133→
+   134→function buildNotifications(
+   135→  scoreHistory: ScoreEntry[],
+   136→  applications: ReturnType<typeof useResumeStore.getState>["applications"],
+   137→  resumes: ReturnType<typeof useResumeStore.getState>["resumes"]
+   138→): NotificationItem[] {
+   139→  const items: NotificationItem[] = [];
+   140→  const now = Date.now();
+   141→  const day = 1000 * 60 * 60 * 24;
+   142→
+   143→  /* Latest ATS scan per resume, with delta vs the previous scan */
+   144→  const byResume = new Map<string, ScoreEntry[]>();
+   145→  for (const e of scoreHistory) {
+   146→    const list = byResume.get(e.resumeId) ?? [];
+   147→    list.push(e);
+   148→    byResume.set(e.resumeId, list);
+   149→  }
+   150→  for (const list of byResume.values()) {
+   151→    const sorted = [...list].sort((a, b) => a.at - b.at);
+   152→    const latest = sorted[sorted.length - 1];
+   153→    const prev = sorted[sorted.length - 2];
+   154→    const delta = prev ? latest.score - prev.score : 0;
+   155→    items.push({
+   156→      id: `score-${latest.id}`,
+   157→      kind: delta > 0 ? "score-up" : delta < 0 ? "score-down" : "resume",
+   158→      title: `ATS scan — ${latest.score}/100`,
+   159→      body:
+   160→        delta === 0
+   161→          ? `${latest.resumeTitle} · no change since your last scan.`
+   162→          : `${latest.resumeTitle} ${delta > 0 ? "improved" : "dropped"} ${Math.abs(delta)} pts since your last scan.`,
+   163→      at: latest.at,
+   164→      href: "/dashboard/ats",
+   165→    });
+   166→  }
+   167→
+   168→  /* Pipeline events updated in the last 7 days */
+   169→  for (const app of applications) {
+   170→    if (now - app.updatedAt > day * 7) continue;
+   171→    if (app.stage === "offer") {
+   172→      items.push({
+   173→        id: `app-${app.id}`,
+   174→        kind: "offer",
+   175→        title: `Offer from ${app.company}`,
+   176→        body: `${app.role} — time to celebrate (and negotiate).`,
+   177→        at: app.updatedAt,
+   178→        href: "/dashboard/tracker",
+   179→      });
+   180→    } else if (app.stage === "interview") {
+   181→      items.push({
+   182→        id: `app-${app.id}`,
+   183→        kind: "interview",
+   184→        title: `Interview at ${app.company}`,
+   185→        body: `${app.role} — drill the question bank before the call.`,
+   186→        at: app.updatedAt,
+   187→        href: "/dashboard/interview",
+   188→      });
+   189→    } else if (app.stage === "rejected") {
+   190→      items.push({
+   191→        id: `app-${app.id}`,
+   192→        kind: "rejected",
+   193→        title: `${app.company} passed on ${app.role}`,
+   194→        body: "Closed — keep the pipeline moving, momentum matters.",
+   195→        at: app.updatedAt,
+   196→        href: "/dashboard/tracker",
+   197→      });
+   198→    }
+   199→  }
+   200→
+   201→  /* Resume edits from the last 3 days */
+   202→  for (const r of resumes) {
+   203→    if (now - r.updatedAt > day * 3) continue;
+   204→    items.push({
+   205→      id: `resume-${r.id}-${r.updatedAt}`,
+   206→      kind: "resume",
+   207→      title: "Resume saved",
+   208→      body: `${r.title} — all changes are stored safely.`,
+   209→      at: r.updatedAt,
+   210→      href: "/dashboard/builder",
+   211→    });
+   212→  }
+   213→
+   214→  return items.sort((a, b) => b.at - a.at).slice(0, 8);
+   215→}
+   216→
+   217→function NotificationBell() {
+   218→  const mounted = useMountedShell();
+   219→  const scoreHistory = useResumeStore((s) => s.scoreHistory);
+   220→  const applications = useResumeStore((s) => s.applications);
+   221→  const resumes = useResumeStore((s) => s.resumes);
+   222→
+   223→  const [open, setOpen] = React.useState(false);
+   224→  const [lastRead, setLastRead] = React.useState(0);
+   225→
+   226→  const items = React.useMemo(
+   227→    () => buildNotifications(scoreHistory, applications, resumes),
+   228→    [scoreHistory, applications, resumes]
+   229→  );
+   230→
+   231→  /* Load the stored read-marker after hydration to avoid SSR mismatch */
+   232→  React.useEffect(() => {
+   233→    setLastRead(readNotifsLastRead());
+   234→  }, []);
+   235→
+   236→  /* Opening the dropdown marks everything read */
+   237→  React.useEffect(() => {
+   238→    if (!open) return;
+   239→    const ts = Date.now();
+   240→    setLastRead(ts);
+   241→    try {
+   242→      localStorage.setItem(NOTIFS_READ_KEY, String(ts));
+   243→    } catch {
+   244→      /* storage unavailable — badge simply returns next visit */
+   245→    }
+   246→  }, [open]);
+   247→
+   248→  const unreadCount = items.filter((i) => i.at > lastRead).length;
+   249→
+   250→  return (
+   251→    <DropdownMenu open={open} onOpenChange={setOpen}>
+   252→      <Tooltip>
+   253→        <TooltipTrigger asChild>
+   254→          <DropdownMenuTrigger asChild>
+   255→            <Button
+   256→              variant="ghost"
+   257→              size="icon"
+   258→              className={cn("relative h-9 w-9", open && "bg-muted")}
+   259→              aria-label={
+   260→                unreadCount > 0
+   261→                  ? `Notifications, ${unreadCount} unread`
+   262→                  : "Notifications"
+   263→              }
+   264→            >
+   265→              <Bell className="h-4.5 w-4.5" />
+   266→              {mounted && unreadCount > 0 && (
+   267→                <span
+   268→                  className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 px-1 text-[9px] font-bold text-white ring-2 ring-background"
+   269→                  aria-hidden
+   270→                >
+   271→                  {unreadCount > 9 ? "9+" : unreadCount}
+   272→                </span>
+   273→              )}
+   274→            </Button>
+   275→          </DropdownMenuTrigger>
+   276→        </TooltipTrigger>
+   277→        <TooltipContent>Notifications</TooltipContent>
+   278→      </Tooltip>
+   279→      <DropdownMenuContent align="end" className="w-[340px] overflow-hidden p-0">
+   280→        <div className="flex items-center justify-between border-b px-3.5 py-3">
+   281→          <div className="flex items-center gap-2">
+   282→            <p className="text-[13px] font-semibold">Notifications</p>
+   283→            {unreadCount > 0 && (
+   284→              <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+   285→                {unreadCount} new
+   286→              </span>
+   287→            )}
+   288→          </div>
+   289→          <button
+   290→            type="button"
+   291→            onClick={(e) => {
+   292→              e.stopPropagation();
+   293→              const ts = Date.now();
+   294→              setLastRead(ts);
+   295→              try {
+   296→                localStorage.setItem(NOTIFS_READ_KEY, String(ts));
+   297→              } catch {
+   298→                /* noop */
+   299→              }
+   300→            }}
+   301→            className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+   302→          >
+   303→            <CheckCheck className="size-3.5" aria-hidden />
+   304→            Mark all read
+   305→          </button>
+   306→        </div>
+   307→        <div className="max-h-[320px] overflow-y-auto scrollbar-thin">
+   308→          {items.length === 0 ? (
+   309→            <div className="flex flex-col items-center gap-1.5 px-6 py-10 text-center">
+   310→              <span className="flex size-10 items-center justify-center rounded-full bg-muted">
+   311→                <Bell className="size-4 text-muted-foreground" />
+   312→              </span>
+   313→              <p className="text-[12.5px] font-medium">You&apos;re all caught up</p>
+   314→              <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+   315→                Scan a resume or move an application to see updates here.
+   316→              </p>
+   317→            </div>
+   318→          ) : (
+   319→            <ul>
+   320→              {items.map((item) => {
+   321→                const meta = NOTIF_META[item.kind];
+   322→                const Icon = meta.icon;
+   323→                const unread = item.at > lastRead;
+   324→                return (
+   325→                  <li key={item.id} className="border-b last:border-b-0">
+   326→                    <Link
+   327→                      href={item.href}
+   328→                      onClick={() => setOpen(false)}
+   329→                      className={cn(
+   330→                        "flex gap-3 px-3.5 py-3 transition-colors hover:bg-muted/60",
+   331→                        unread && "bg-emerald-500/[0.04] dark:bg-emerald-400/[0.05]"
+   332→                      )}
+   333→                    >
+   334→                      <span
+   335→                        className={cn(
+   336→                          "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg",
+   337→                          meta.tint
+   338→                        )}
+   339→                      >
+   340→                        <Icon className="size-4" />
+   341→                      </span>
+   342→                      <span className="min-w-0 flex-1">
+   343→                        <span className="flex items-center justify-between gap-2">
+   344→                          <span className="truncate text-[12.5px] font-semibold text-foreground">
+   345→                            {item.title}
+   346→                          </span>
+   347→                          {unread && (
+   348→                            <span
+   349→                              className="size-1.5 shrink-0 rounded-full bg-emerald-500"
+   350→                              aria-label="Unread"
+   351→                            />
+   352→                          )}
+   353→                        </span>
+   354→                        <span className="mt-0.5 line-clamp-2 block text-[11.5px] leading-snug text-muted-foreground">
+   355→                          {item.body}
+   356→                        </span>
+   357→                        <span className="mt-1 block text-[10.5px] font-medium text-muted-foreground/70">
+   358→                          {formatDistanceToNow(new Date(item.at), { addSuffix: true })}
+   359→                        </span>
+   360→                      </span>
+   361→                    </Link>
+   362→                  </li>
+   363→                );
+   364→              })}
+   365→            </ul>
+   366→          )}
+   367→        </div>
+   368→        <div className="grid grid-cols-2 border-t bg-muted/30">
+   369→          <Link
+   370→            href="/dashboard/ats"
+   371→            onClick={() => setOpen(false)}
+   372→            className="px-3 py-2.5 text-center text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+   373→          >
+   374→            ATS scanner
+   375→          </Link>
+   376→          <Link
+   377→            href="/dashboard/tracker"
+   378→            onClick={() => setOpen(false)}
+   379→            className="border-l px-3 py-2.5 text-center text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+   380→          >
+   381→            Job tracker
+   382→          </Link>
+   383→        </div>
+   384→      </DropdownMenuContent>
+   385→    </DropdownMenu>
+   386→  );
+   387→}
+   388→
+   389→function useMountedShell() {
+   390→  // shell-level hydration gate for the unread badge (avoids SSR mismatch)
+   391→  const [mounted, setMounted] = React.useState(false);
+   392→  React.useEffect(() => setMounted(true), []);
+   393→  return mounted;
+   394→}
+   395→
+   396→const NAV_GROUPS: Array<{
+   397→  label: string;
+   398→  items: Array<{ href: string; label: string; icon: React.ComponentType<{ className?: string }>; badge?: string }>;
+   399→}> = [
+   400→  {
+   401→    label: "Overview",
+   402→    items: [
+   403→      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+   404→      { href: "/dashboard/resumes", label: "My Resumes", icon: FileText },
+   405→      { href: "/dashboard/builder", label: "Resume Studio", icon: PenLine },
+   406→      { href: "/dashboard/templates", label: "Templates", icon: LayoutTemplate },
+   407→      { href: "/dashboard/compare", label: "Compare", icon: GitCompareArrows },
+   408→      { href: "/dashboard/tracker", label: "Job Tracker", icon: Briefcase },
+   409→    ],
+   410→  },
+   411→  {
+   412→    label: "AI Tools",
+   413→    items: [
+   414→      { href: "/dashboard/ats", label: "ATS Scanner", icon: Target },
+   415→      { href: "/dashboard/grammar", label: "Grammar Check", icon: SpellCheck },
+   416→      { href: "/dashboard/cover-letter", label: "Cover Letters", icon: Mail },
+   417→      { href: "/dashboard/portfolio", label: "Portfolio Site", icon: Globe },
+   418→      { href: "/dashboard/interview", label: "Interview Prep", icon: MessagesSquare },
+   419→    ],
+   420→  },
+   421→  {
+   422→    label: "Account",
+   423→    items: [
+   424→      { href: "/dashboard/linkedin", label: "LinkedIn Import", icon: Linkedin },
+   425→      { href: "/dashboard/settings", label: "Settings", icon: Settings },
+   426→    ],
+   427→  },
+   428→];
+   429→
+   430→function Logo({ compact = false }: { compact?: boolean }) {
+   431→  return (
+   432→    <Link href="/" className="flex items-center gap-2.5 group">
+   433→      <div className="relative">
+   434→        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 group-hover:scale-105 transition-transform">
+   435→          <Sparkles className="w-5 h-5 text-white" />
+   436→        </div>
+   437→      </div>
+   438→      {!compact && (
+   439→        <div className="leading-tight">
+   440→          <p className="font-bold tracking-tight text-[15px]">
+   441→            Resume<span className="text-emerald-500">Forge</span>
+   442→          </p>
+   443→          <p className="text-[10px] text-muted-foreground -mt-0.5">AI Career Studio</p>
+   444→        </div>
+   445→      )}
+   446→    </Link>
+   447→  );
+   448→}
+   449→
+   450→function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+   451→  const pathname = usePathname();
+   452→  return (
+   453→    <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5 scrollbar-thin">
+   454→      {NAV_GROUPS.map((group) => (
+   455→        <div key={group.label}>
+   456→          <p className="px-2.5 mb-1.5 text-[10.5px] font-semibold tracking-[0.14em] uppercase text-muted-foreground/70">
+   457→            {group.label}
+   458→          </p>
+   459→          <div className="space-y-0.5">
+   460→            {group.items.map((item) => {
+   461→              const active =
+   462→                item.href === "/dashboard"
+   463→                  ? pathname === "/dashboard"
+   464→                  : pathname.startsWith(item.href);
+   465→              const Icon = item.icon;
+   466→              return (
+   467→                <Link
+   468→                  key={item.href}
+   469→                  href={item.href}
+   470→                  onClick={onNavigate}
+   471→                  className={cn(
+   472→                    "group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-all",
+   473→                    active
+   474→                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-sm"
+   475→                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+   476→                  )}
+   477→                >
+   478→                  <Icon
+   479→                    className={cn(
+   480→                      "w-4 h-4 shrink-0 transition-transform group-hover:scale-110",
+   481→                      active && "text-emerald-500"
+   482→                    )}
+   483→                  />
+   484→                  <span className="truncate">{item.label}</span>
+   485→                  {active && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+   486→                </Link>
+   487→              );
+   488→            })}
+   489→          </div>
+   490→        </div>
+   491→      ))}
+   492→    </nav>
+   493→  );
+   494→}
+   495→
+   496→function SidebarFooter() {
+   497→  return (
+   498→    <div className="p-3 border-t">
+   499→      <div className="rounded-xl p-3.5 bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent border border-emerald-500/20">
+   500→        <div className="flex items-center gap-2 mb-1">
+   501→          <Zap className="w-3.5 h-3.5 text-emerald-500" />
+   502→          <p className="text-[12px] font-semibold">Pro tip</p>
+   503→        </div>
+   504→        <p className="text-[11px] text-muted-foreground leading-relaxed">
+   505→          Run the ATS Scanner after every edit to keep your score above 85.
+   506→        </p>
+   507→      </div>
+   508→    </div>
+   509→  );
+   510→}
+   511→
+   512→export default function DashboardShell({ children }: { children: React.ReactNode }) {
+   513→  const pathname = usePathname();
+   514→  const { theme, setTheme } = useTheme();
+   515→  const [mounted, setMounted] = React.useState(false);
+   516→  const [mobileOpen, setMobileOpen] = React.useState(false);
+   517→  const [paletteOpen, setPaletteOpen] = React.useState(false);
+   518→  const router = useRouter();
+   519→  const createResume = useResumeStore((s) => s.createResume);
+   520→
+   521→  React.useEffect(() => setMounted(true), []);
+   522→
+   523→  /* ⌘K / Ctrl+K opens the command palette */
+   524→  React.useEffect(() => {
+   525→    const down = (e: KeyboardEvent) => {
+   526→      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+   527→        e.preventDefault();
+   528→        setPaletteOpen((open) => !open);
+   529→      }
+   530→    };
+   531→    document.addEventListener("keydown", down);
+   532→    return () => document.removeEventListener("keydown", down);
+   533→  }, []);
+   534→
+   535→  const runCommand = React.useCallback((command: () => void) => {
+   536→    setPaletteOpen(false);
+   537→    command();
+   538→  }, []);
+   539→
+   540→  const pageTitle =
+   541→    NAV_GROUPS.flatMap((g) => g.items).find((i) =>
+   542→      i.href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(i.href)
+   543→    )?.label ?? "Dashboard";
+   544→
+   545→  return (
+   546→    <TooltipProvider delayDuration={200}>
+   547→      <div className="min-h-screen flex bg-background">
+   548→        {/* Desktop sidebar */}
+   549→        <aside className="hidden lg:flex w-[248px] shrink-0 flex-col border-r bg-sidebar">
+   550→          <div className="h-16 flex items-center px-5 border-b">
+   551→            <Logo />
+   552→          </div>
+   553→          <NavLinks />
+   554→          <SidebarFooter />
+   555→        </aside>
+   556→
+   557→        <div className="flex-1 flex flex-col min-w-0">
+   558→          {/* Topbar */}
+   559→          <header className="h-16 shrink-0 sticky top-0 z-40 flex items-center gap-3 px-4 md:px-6 border-b bg-background/80 backdrop-blur-xl">
+   560→            {/* Mobile menu */}
+   561→            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+   562→              <SheetTrigger asChild>
+   563→                <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu">
+   564→                  <Menu className="w-5 h-5" />
+   565→                </Button>
+   566→              </SheetTrigger>
+   567→              <SheetContent side="left" className="p-0 w-[272px]">
+   568→                <SheetTitle className="sr-only">Navigation</SheetTitle>
+   569→                <div className="h-16 flex items-center px-5 border-b">
+   570→                  <Logo />
+   571→                </div>
+   572→                <NavLinks onNavigate={() => setMobileOpen(false)} />
+   573→                <SidebarFooter />
+   574→              </SheetContent>
+   575→            </Sheet>
+   576→
+   577→            <div className="hidden md:flex items-center gap-2 min-w-0">
+   578→              <h1 className="font-semibold text-[15px] truncate">{pageTitle}</h1>
+   579→            </div>
+   580→
+   581→            <div className="relative ml-auto w-full max-w-[220px] hidden sm:block">
+   582→              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+   583→              <button
+   584→                type="button"
+   585→                onClick={() => setPaletteOpen(true)}
+   586→                className="h-9 w-full pl-8 pr-12 rounded-lg text-[13px] text-muted-foreground text-left bg-muted/60 border border-transparent hover:border-border hover:bg-muted transition-colors"
+   587→                aria-label="Open command palette"
+   588→              >
+   589→                Search tools…
+   590→                <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded border bg-background px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+   591→                  ⌘K
+   592→                </kbd>
+   593→              </button>
+   594→            </div>
+   595→
+   596→            <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
+   597→              <Button
+   598→                size="sm"
+   599→                onClick={() => createResume("Untitled Resume", "modern", "#10b981")}
+   600→                className="h-9 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-md shadow-emerald-500/20 gap-1.5"
+   601→              >
+   602→                <Plus className="w-4 h-4" />
+   603→                <span className="hidden sm:inline">New Resume</span>
+   604→              </Button>
+   605→
+   606→              <Tooltip>
+   607→                <TooltipTrigger asChild>
+   608→                  <Button
+   609→                    variant="ghost"
+   610→                    size="icon"
+   611→                    className="h-9 w-9"
+   612→                    onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+   613→                    aria-label="Toggle theme"
+   614→                  >
+   615→                    {mounted && theme === "dark" ? <Sun className="w-4.5 h-4.5" /> : <Moon className="w-4.5 h-4.5" />}
+   616→                  </Button>
+   617→                </TooltipTrigger>
+   618→                <TooltipContent>Toggle theme</TooltipContent>
+   619→              </Tooltip>
+   620→
+   621→              <NotificationBell />
+   622→
+   623→              <DropdownMenu>
+   624→                <DropdownMenuTrigger asChild>
+   625→                  <button
+   626→                    className="h-9 w-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-white text-[12px] font-bold flex items-center justify-center ring-2 ring-emerald-500/20 hover:ring-emerald-500/40 transition-all"
+   627→                    aria-label="Account menu"
+   628→                  >
+   629→                    AC
+   630→                  </button>
+   631→                </DropdownMenuTrigger>
+   632→                <DropdownMenuContent align="end" className="w-52">
+   633→                  <DropdownMenuLabel>
+   634→                    <div className="flex flex-col">
+   635→                      <span>Alexander Chen</span>
+   636→                      <span className="text-[11px] font-normal text-muted-foreground">alex.chen@email.com</span>
+   637→                    </div>
+   638→                  </DropdownMenuLabel>
+   639→                  <DropdownMenuSeparator />
+   640→                  <DropdownMenuItem asChild>
+   641→                    <Link href="/dashboard/settings">
+   642→                      <User className="w-4 h-4 mr-2" /> Profile settings
+   643→                    </Link>
+   644→                  </DropdownMenuItem>
+   645→                  <DropdownMenuItem asChild>
+   646→                    <Link href="/dashboard/settings">
+   647→                      <Settings className="w-4 h-4 mr-2" /> Preferences
+   648→                    </Link>
+   649→                  </DropdownMenuItem>
+   650→                  <DropdownMenuSeparator />
+   651→                  <DropdownMenuItem asChild>
+   652→                    <Link href="/">
+   653→                      <LogOut className="w-4 h-4 mr-2" /> Back to website
+   654→                    </Link>
+   655→                  </DropdownMenuItem>
+   656→                </DropdownMenuContent>
+   657→              </DropdownMenu>
+   658→            </div>
+   659→          </header>
+   660→
+   661→          {/* Page content */}
+   662→          <main className="flex-1 p-4 md:p-6 lg:p-8">{children}</main>
+   663→        </div>
+   664→      </div>
+   665→
+   666→      {/* ⌘K Command palette */}
+   667→      <CommandDialog open={paletteOpen} onOpenChange={setPaletteOpen}>
+   668→        <CommandInput placeholder="Type a command or search…" />
+   669→        <CommandList>
+   670→          <CommandEmpty>No results found.</CommandEmpty>
+   671→          {NAV_GROUPS.map((group) => (
+   672→            <CommandGroup key={group.label} heading={group.label}>
+   673→              {group.items.map((item) => (
+   674→                <CommandItem
+   675→                  key={item.href}
+   676→                  value={item.label}
+   677→                  onSelect={() => runCommand(() => router.push(item.href))}
+   678→                >
+   679→                  <item.icon className="w-4 h-4 mr-2 text-muted-foreground" />
+   680→                  {item.label}
+   681→                </CommandItem>
+   682→              ))}
+   683→            </CommandGroup>
+   684→          ))}
+   685→          <CommandSeparator />
+   686→          <CommandGroup heading="Actions">
+   687→            <CommandItem
+   688→              value="new resume"
+   689→              onSelect={() =>
+   690→                runCommand(() => {
+   691→                  createResume("Untitled Resume", "modern", "#10b981");
+   692→                  router.push("/dashboard/builder");
+   693→                })
+   694→              }
+   695→            >
+   696→              <Plus className="w-4 h-4 mr-2 text-muted-foreground" />
+   697→              Create new resume
+   698→            </CommandItem>
+   699→            <CommandItem
+   700→              value="toggle theme"
+   701→              onSelect={() => runCommand(() => setTheme(theme === "dark" ? "light" : "dark"))}
+   702→            >
+   703→              {mounted && theme === "dark" ? (
+   704→                <Sun className="w-4 h-4 mr-2 text-muted-foreground" />
+   705→              ) : (
+   706→                <Moon className="w-4 h-4 mr-2 text-muted-foreground" />
+   707→              )}
+   708→              Toggle light / dark theme
+   709→            </CommandItem>
+   710→            <CommandItem
+   711→              value="landing website"
+   712→              onSelect={() => runCommand(() => router.push("/"))}
+   713→            >
+   714→              <Sparkles className="w-4 h-4 mr-2 text-muted-foreground" />
+   715→              Go to landing page
+   716→            </CommandItem>
+   717→          </CommandGroup>
+   718→        </CommandList>
+   719→      </CommandDialog>
+   720→    </TooltipProvider>
+   721→  );
+   722→}
+   723→

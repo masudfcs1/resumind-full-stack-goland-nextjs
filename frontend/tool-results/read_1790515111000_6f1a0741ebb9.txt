@@ -1,0 +1,1066 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import * as React from "react";
+     4→     4→import { useRouter } from "next/navigation";
+     5→     5→import { AnimatePresence, motion } from "framer-motion";
+     6→     6→import {
+     7→     7→  Activity,
+     8→     8→  Archive,
+     9→     9→  CheckSquare,
+    10→    10→  Copy,
+    11→    11→  LayoutGrid,
+    12→    12→  List,
+    13→    13→  Loader2,
+    14→    14→  Plus,
+    15→    15→  RefreshCw,
+    16→    16→  Search,
+    17→    17→  SearchX,
+    18→    18→  Sparkles,
+    19→    19→  Trash2,
+    20→    20→  X,
+    21→    21→} from "lucide-react";
+    22→    22→import { toast } from "sonner";
+    23→    23→import {
+    24→    24→  ACCENT_PRESETS,
+    25→    25→  TEMPLATE_META,
+    26→    26→  showDeleteUndoToast,
+    27→    27→  takeUndoEntries,
+    28→    28→  useActiveResume,
+    29→    29→  useResumeStore,
+    30→    30→  type ResumeData,
+    31→    31→  type TemplateId,
+    32→    32→} from "@/lib/resume-store";
+    33→    33→import { atsAnalyze } from "@/lib/mock-ai";
+    34→    34→import { healthRank, resumeHealth, type ResumeHealth } from "@/lib/resume-health";
+    35→    35→import { useMounted } from "@/lib/use-mounted";
+    36→    36→import { cn } from "@/lib/utils";
+    37→    37→import { Badge } from "@/components/ui/badge";
+    38→    38→import { Button } from "@/components/ui/button";
+    39→    39→import {
+    40→    40→  AlertDialog,
+    41→    41→  AlertDialogAction,
+    42→    42→  AlertDialogCancel,
+    43→    43→  AlertDialogContent,
+    44→    44→  AlertDialogDescription,
+    45→    45→  AlertDialogFooter,
+    46→    46→  AlertDialogHeader,
+    47→    47→  AlertDialogTitle,
+    48→    48→} from "@/components/ui/alert-dialog";
+    49→    49→import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+    50→    50→import { Input } from "@/components/ui/input";
+    51→    51→import { Label } from "@/components/ui/label";
+    52→    52→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    53→    53→import { Skeleton } from "@/components/ui/skeleton";
+    54→    54→import { ResumeCard, ResumeListRow } from "@/components/dashboard/resume-card";
+    55→    55→
+    56→    56→/* ------------------------------------------------------------------ */
+    57→    57→/* Types & constants                                                   */
+    58→    58→/* ------------------------------------------------------------------ */
+    59→    59→
+    60→    60→type SortKey = "recent" | "name" | "ats" | "health";
+    61→    61→type ViewMode = "grid" | "list";
+    62→    62→type ResumeTab = "active" | "archived";
+    63→    63→type HealthCountBucket = "fresh" | "aging" | "stale" | "never";
+    64→    64→type HealthFilterKey = "all" | "fresh" | "aging" | "stale";
+    65→    65→
+    66→    66→/* Fallback health for a resume missing from the derived map (never scanned). */
+    67→    67→const NEVER_HEALTH: ResumeHealth = { bucket: "stale", scanned: false, latest: null };
+    68→    68→
+    69→    69→/* Filter chips reuse each bucket's soft tint so color-coding stays consistent
+    70→    70→   with the pills and the summary strip; the active chip adds the emerald state. */
+    71→    71→const HEALTH_CHIP_TINT: Record<HealthFilterKey, string> = {
+    72→    72→  all: "border-zinc-500/25 bg-zinc-500/[0.07] text-zinc-600 hover:bg-zinc-500/15 dark:text-zinc-400",
+    73→    73→  fresh:
+    74→    74→    "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-400",
+    75→    75→  aging:
+    76→    76→    "border-amber-500/20 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-400",
+    77→    77→  stale:
+    78→    78→    "border-rose-500/20 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-400",
+    79→    79→};
+    80→    80→const HEALTH_CHIP_DOT: Record<HealthFilterKey, string> = {
+    81→    81→  all: "bg-zinc-400 dark:bg-zinc-500",
+    82→    82→  fresh: "bg-emerald-500",
+    83→    83→  aging: "bg-amber-500",
+    84→    84→  stale: "bg-rose-500",
+    85→    85→};
+    86→    86→const HEALTH_CHIP_LABEL: Record<HealthFilterKey, string> = {
+    87→    87→  all: "All",
+    88→    88→  fresh: "Fresh",
+    89→    89→  aging: "Aging",
+    90→    90→  stale: "Stale",
+    91→    91→};
+    92→    92→const HEALTH_CHIP_TITLE: Record<HealthFilterKey, string> = {
+    93→    93→  all: "Show every resume",
+    94→    94→  fresh: "Scanned within the last 24 hours",
+    95→    95→  aging: "Last scanned 1–7 days ago",
+    96→    96→  stale: "Last scanned over 7 days ago, or never scanned",
+    97→    97→};
+    98→    98→
+    99→    99→function HealthChip({
+   100→   100→  filterKey,
+   101→   101→  count,
+   102→   102→  active,
+   103→   103→  onToggle,
+   104→   104→}: {
+   105→   105→  filterKey: HealthFilterKey;
+   106→   106→  count: number;
+   107→   107→  active: boolean;
+   108→   108→  onToggle: () => void;
+   109→   109→}) {
+   110→   110→  return (
+   111→   111→    <button
+   112→   112→      type="button"
+   113→   113→      data-health-chip={filterKey}
+   114→   114→      data-chip-count={count}
+   115→   115→      aria-pressed={active}
+   116→   116→      title={HEALTH_CHIP_TITLE[filterKey]}
+   117→   117→      onClick={onToggle}
+   118→   118→      className={cn(
+   119→   119→        "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] font-medium leading-none transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+   120→   120→        active
+   121→   121→          ? "border-emerald-500/70 bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/40 dark:text-emerald-400"
+   122→   122→          : HEALTH_CHIP_TINT[filterKey]
+   123→   123→      )}
+   124→   124→    >
+   125→   125→      <span className={cn("size-1.5 shrink-0 rounded-full", HEALTH_CHIP_DOT[filterKey])} aria-hidden="true" />
+   126→   126→      {HEALTH_CHIP_LABEL[filterKey]}
+   127→   127→      <span className="tabular-nums opacity-70">{count}</span>
+   128→   128→    </button>
+   129→   129→  );
+   130→   130→}
+   131→   131→
+   132→   132→const TEMPLATE_IDS: TemplateId[] = ["modern", "classic", "minimal", "creative", "executive", "technical"];
+   133→   133→
+   134→   134→/* Active / Archived view switch — two pill tabs in the same visual language
+   135→   135→   as the health chips (aria-pressed toggle buttons). Counts are per-view and
+   136→   136→   query-agnostic so they always agree with the list lengths. */
+   137→   137→function ViewPill({
+   138→   138→  tabKey,
+   139→   139→  count,
+   140→   140→  current,
+   141→   141→  onSelect,
+   142→   142→}: {
+   143→   143→  tabKey: ResumeTab;
+   144→   144→  count: number;
+   145→   145→  current: ResumeTab;
+   146→   146→  onSelect: (tab: ResumeTab) => void;
+   147→   147→}) {
+   148→   148→  const pressed = current === tabKey;
+   149→   149→  return (
+   150→   150→    <button
+   151→   151→      type="button"
+   152→   152→      data-view-pill={tabKey}
+   153→   153→      data-pill-count={count}
+   154→   154→      aria-pressed={pressed}
+   155→   155→      title={
+   156→   156→        tabKey === "active"
+   157→   157→          ? "Show resumes in your active workspace"
+   158→   158→          : "Show archived resumes — hidden from the active list, not deleted"
+   159→   159→      }
+   160→   160→      onClick={() => onSelect(tabKey)}
+   161→   161→      className={cn(
+   162→   162→        "inline-flex h-8 cursor-pointer items-center gap-1 rounded-full px-3 text-[12px] font-medium leading-none transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+   163→   163→        pressed
+   164→   164→          ? "bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/50 dark:text-emerald-400"
+   165→   165→          : "text-zinc-500 hover:bg-zinc-500/10 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-500/10 dark:hover:text-zinc-200"
+   166→   166→      )}
+   167→   167→    >
+   168→   168→      {tabKey === "active" ? "Active" : "Archived"}
+   169→   169→      <span className="tabular-nums opacity-70">({count})</span>
+   170→   170→    </button>
+   171→   171→  );
+   172→   172→}
+   173→   173→
+   174→   174→/* Health summary stat — colored dot + tabular count, dot separator travels
+   175→   175→   with its item (after:) so wrapped lines never start with a stray “·”. */
+   176→   176→const HEALTH_DOT: Record<HealthCountBucket, string> = {
+   177→   177→  fresh: "bg-emerald-500",
+   178→   178→  aging: "bg-amber-500",
+   179→   179→  stale: "bg-rose-500",
+   180→   180→  never: "bg-zinc-400 dark:bg-zinc-500",
+   181→   181→};
+   182→   182→const HEALTH_LABEL: Record<HealthCountBucket, string> = {
+   183→   183→  fresh: "fresh",
+   184→   184→  aging: "aging",
+   185→   185→  stale: "stale",
+   186→   186→  never: "never scanned",
+   187→   187→};
+   188→   188→
+   189→   189→function HealthStat({ bucket, count }: { bucket: HealthCountBucket; count: number }) {
+   190→   190→  return (
+   191→   191→    <span
+   192→   192→      data-health-count={bucket}
+   193→   193→      className="inline-flex items-center gap-1.5 after:pl-2.5 after:text-muted-foreground/50 after:content-['·'] last:after:hidden"
+   194→   194→    >
+   195→   195→      <span className={cn("size-1.5 shrink-0 rounded-full", HEALTH_DOT[bucket])} aria-hidden="true" />
+   196→   196→      <span>
+   197→   197→        {count} {HEALTH_LABEL[bucket]}
+   198→   198→      </span>
+   199→   199→    </span>
+   200→   200→  );
+   201→   201→}
+   202→   202→
+   203→   203→/* Mini colored thumbnail used in the template radio-cards */
+   204→   204→function GlyphLine({ w, light = false }: { w: number; light?: boolean }) {
+   205→   205→  return (
+   206→   206→    <span
+   207→   207→      className={cn(
+   208→   208→        "block h-[3px] shrink-0 rounded-full",
+   209→   209→        light ? "bg-white/75" : "bg-neutral-400/70 dark:bg-neutral-500/70"
+   210→   210→      )}
+   211→   211→      style={{ width: `${w}%` }}
+   212→   212→    />
+   213→   213→  );
+   214→   214→}
+   215→   215→
+   216→   216→function TemplateGlyph({
+   217→   217→  template,
+   218→   218→  accent,
+   219→   219→  className,
+   220→   220→}: {
+   221→   221→  template: TemplateId;
+   222→   222→  accent: string;
+   223→   223→  className?: string;
+   224→   224→}) {
+   225→   225→  const base =
+   226→   226→    "h-16 w-full overflow-hidden rounded-md border border-black/5 bg-neutral-50 dark:border-white/10 dark:bg-neutral-900";
+   227→   227→
+   228→   228→  switch (template) {
+   229→   229→    case "modern":
+   230→   230→      return (
+   231→   231→        <div className={cn(base, "flex gap-1.5", className)}>
+   232→   232→          <div className="flex w-1/3 flex-col gap-1 p-1.5" style={{ backgroundColor: accent }}>
+   233→   233→            <GlyphLine w={85} light />
+   234→   234→            <GlyphLine w={65} light />
+   235→   235→            <GlyphLine w={75} light />
+   236→   236→            <GlyphLine w={55} light />
+   237→   237→          </div>
+   238→   238→          <div className="flex-1 space-y-1 pt-1.5 pr-1.5">
+   239→   239→            <GlyphLine w={70} />
+   240→   240→            <GlyphLine w={90} />
+   241→   241→            <GlyphLine w={85} />
+   242→   242→            <GlyphLine w={60} />
+   243→   243→            <GlyphLine w={78} />
+   244→   244→          </div>
+   245→   245→        </div>
+   246→   246→      );
+   247→   247→    case "classic":
+   248→   248→      return (
+   249→   249→        <div className={cn(base, "flex flex-col items-center gap-1", className)}>
+   250→   250→          <span className="mt-2 h-3.5 w-3.5 rounded-full border-2" style={{ borderColor: accent }} />
+   251→   251→          <GlyphLine w={45} />
+   252→   252→          <span className="my-0.5 h-px w-2/3" style={{ backgroundColor: accent }} />
+   253→   253→          <GlyphLine w={80} />
+   254→   254→          <GlyphLine w={65} />
+   255→   255→        </div>
+   256→   256→      );
+   257→   257→    case "minimal":
+   258→   258→      return (
+   259→   259→        <div className={cn(base, "flex flex-col justify-center gap-1.5 px-3", className)}>
+   260→   260→          <GlyphLine w={38} />
+   261→   261→          <GlyphLine w={86} />
+   262→   262→          <GlyphLine w={72} />
+   263→   263→          <GlyphLine w={52} />
+   264→   264→        </div>
+   265→   265→      );
+   266→   266→    case "creative":
+   267→   267→      return (
+   268→   268→        <div className={cn(base, "space-y-1.5", className)}>
+   269→   269→          <div className="-mx-px -mt-px flex h-4 items-center px-1.5" style={{ backgroundColor: accent }}>
+   270→   270→            <GlyphLine w={42} light />
+   271→   271→          </div>
+   272→   272→          <div className="flex justify-between gap-1 px-1">
+   273→   273→            {[26, 20, 24, 16].map((w, i) => (
+   274→   274→              <span
+   275→   275→                key={i}
+   276→   276→                className="h-2 rounded-full"
+   277→   277→                style={{ width: `${w}%`, backgroundColor: `${accent}40` }}
+   278→   278→              />
+   279→   279→            ))}
+   280→   280→          </div>
+   281→   281→          <div className="space-y-1 px-1 pb-1">
+   282→   282→            <GlyphLine w={88} />
+   283→   283→            <GlyphLine w={66} />
+   284→   284→          </div>
+   285→   285→        </div>
+   286→   286→      );
+   287→   287→    case "executive":
+   288→   288→      return (
+   289→   289→        <div className={cn(base, "space-y-1.5", className)}>
+   290→   290→          <div className="-mx-px -mt-px flex h-6 flex-col justify-center gap-1 bg-neutral-800 px-1.5 dark:bg-neutral-700">
+   291→   291→            <GlyphLine w={46} light />
+   292→   292→            <GlyphLine w={30} light />
+   293→   293→          </div>
+   294→   294→          <div className="flex gap-2 px-1.5 pb-1">
+   295→   295→            <div className="flex-1 space-y-1">
+   296→   296→              <GlyphLine w={92} />
+   297→   297→              <GlyphLine w={78} />
+   298→   298→            </div>
+   299→   299→            <div className="flex-1 space-y-1">
+   300→   300→              <GlyphLine w={92} />
+   301→   301→              <GlyphLine w={70} />
+   302→   302→            </div>
+   303→   303→          </div>
+   304→   304→        </div>
+   305→   305→      );
+   306→   306→    case "technical":
+   307→   307→      return (
+   308→   308→        <div className={cn(base, "grid grid-cols-2 gap-x-2 gap-y-1 p-2", className)}>
+   309→   309→          {Array.from({ length: 8 }).map((_, i) => (
+   310→   310→            <GlyphLine key={i} w={((i * 17) % 38) + 56} />
+   311→   311→          ))}
+   312→   312→        </div>
+   313→   313→      );
+   314→   314→  }
+   315→   315→}
+   316→   316→
+   317→   317→/* ------------------------------------------------------------------ */
+   318→   318→/* New Resume dialog                                                   */
+   319→   319→/* ------------------------------------------------------------------ */
+   320→   320→
+   321→   321→function NewResumeDialog({
+   322→   322→  open,
+   323→   323→  onOpenChange,
+   324→   324→}: {
+   325→   325→  open: boolean;
+   326→   326→  onOpenChange: (open: boolean) => void;
+   327→   327→}) {
+   328→   328→  const router = useRouter();
+   329→   329→  const createResume = useResumeStore((s) => s.createResume);
+   330→   330→  const [title, setTitle] = React.useState("");
+   331→   331→  const [template, setTemplate] = React.useState<TemplateId>("modern");
+   332→   332→  const [accent, setAccent] = React.useState(ACCENT_PRESETS[0].value);
+   333→   333→
+   334→   334→  const handleCreate = () => {
+   335→   335→    createResume(title.trim() || "Untitled Resume", template, accent);
+   336→   336→    onOpenChange(false);
+   337→   337→    setTitle("");
+   338→   338→    toast.success("Resume created", { description: "Opening it in the Resume Studio…" });
+   339→   339→    router.push("/dashboard/builder");
+   340→   340→  };
+   341→   341→
+   342→   342→  return (
+   343→   343→    <Dialog open={open} onOpenChange={onOpenChange}>
+   344→   344→      <DialogContent className="sm:max-w-lg">
+   345→   345→        <DialogHeader>
+   346→   346→          <DialogTitle className="font-display">Create a new resume</DialogTitle>
+   347→   347→          <DialogDescription>
+   348→   348→            Pick a starting template and accent color — you can change both anytime.
+   349→   349→          </DialogDescription>
+   350→   350→        </DialogHeader>
+   351→   351→
+   352→   352→        <div className="space-y-5">
+   353→   353→          <div className="space-y-2">
+   354→   354→            <Label htmlFor="new-resume-title">Resume title</Label>
+   355→   355→            <Input
+   356→   356→              id="new-resume-title"
+   357→   357→              placeholder="e.g. Senior Frontend Engineer — Google"
+   358→   358→              value={title}
+   359→   359→              onChange={(e) => setTitle(e.target.value)}
+   360→   360→              onKeyDown={(e) => {
+   361→   361→                if (e.key === "Enter") handleCreate();
+   362→   362→              }}
+   363→   363→              autoFocus
+   364→   364→            />
+   365→   365→          </div>
+   366→   366→
+   367→   367→          <div className="space-y-2">
+   368→   368→            <Label>Template</Label>
+   369→   369→            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label="Template">
+   370→   370→              {TEMPLATE_IDS.map((t) => (
+   371→   371→                <button
+   372→   372→                  key={t}
+   373→   373→                  type="button"
+   374→   374→                  role="radio"
+   375→   375→                  aria-checked={template === t}
+   376→   376→                  onClick={() => setTemplate(t)}
+   377→   377→                  className={cn(
+   378→   378→                    "rounded-lg border bg-card p-2 text-left transition-all hover:border-emerald-500/50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   379→   379→                    template === t &&
+   380→   380→                      "border-emerald-500 bg-emerald-500/[0.04] ring-2 ring-emerald-500/25"
+   381→   381→                  )}
+   382→   382→                >
+   383→   383→                  <TemplateGlyph template={t} accent={accent} />
+   384→   384→                  <p className="mt-1.5 text-[12px] font-medium">{TEMPLATE_META[t].name}</p>
+   385→   385→                </button>
+   386→   386→              ))}
+   387→   387→            </div>
+   388→   388→          </div>
+   389→   389→
+   390→   390→          <div className="space-y-2">
+   391→   391→            <Label>Accent color</Label>
+   392→   392→            <div className="flex flex-wrap gap-2.5">
+   393→   393→              {ACCENT_PRESETS.map((preset) => (
+   394→   394→                <button
+   395→   395→                  key={preset.value}
+   396→   396→                  type="button"
+   397→   397→                  title={preset.name}
+   398→   398→                  aria-label={`${preset.name} accent`}
+   399→   399→                  aria-pressed={accent === preset.value}
+   400→   400→                  onClick={() => setAccent(preset.value)}
+   401→   401→                  className={cn(
+   402→   402→                    "h-7 w-7 rounded-full border border-black/10 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:border-white/10",
+   403→   403→                    accent === preset.value &&
+   404→   404→                      "scale-110 ring-2 ring-emerald-500 ring-offset-2 ring-offset-background"
+   405→   405→                  )}
+   406→   406→                  style={{ backgroundColor: preset.value }}
+   407→   407→                />
+   408→   408→              ))}
+   409→   409→            </div>
+   410→   410→          </div>
+   411→   411→        </div>
+   412→   412→
+   413→   413→        <DialogFooter>
+   414→   414→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   415→   415→            Cancel
+   416→   416→          </Button>
+   417→   417→          <Button
+   418→   418→            onClick={handleCreate}
+   419→   419→            className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   420→   420→          >
+   421→   421→            <Plus className="h-4 w-4" aria-hidden="true" /> Create resume
+   422→   422→          </Button>
+   423→   423→        </DialogFooter>
+   424→   424→      </DialogContent>
+   425→   425→    </Dialog>
+   426→   426→  );
+   427→   427→}
+   428→   428→
+   429→   429→/* ------------------------------------------------------------------ */
+   430→   430→/* Skeleton                                                            */
+   431→   431→/* ------------------------------------------------------------------ */
+   432→   432→
+   433→   433→function ResumesSkeleton() {
+   434→   434→  return (
+   435→   435→    <div className="space-y-6" aria-busy="true" aria-label="Loading resumes">
+   436→   436→      <div className="flex flex-wrap items-center gap-3">
+   437→   437→        <Skeleton className="h-8 w-52" />
+   438→   438→        <div className="ml-auto flex gap-2">
+   439→   439→          <Skeleton className="h-9 w-56" />
+   440→   440→          <Skeleton className="h-9 w-40" />
+   441→   441→          <Skeleton className="h-9 w-24" />
+   442→   442→        </div>
+   443→   443→      </div>
+   444→   444→      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+   445→   445→        {Array.from({ length: 6 }).map((_, i) => (
+   446→   446→          <Skeleton key={i} className="h-[360px] rounded-xl" />
+   447→   447→        ))}
+   448→   448→      </div>
+   449→   449→    </div>
+   450→   450→  );
+   451→   451→}
+   452→   452→
+   453→   453→/* ------------------------------------------------------------------ */
+   454→   454→/* Page                                                                */
+   455→   455→/* ------------------------------------------------------------------ */
+   456→   456→
+   457→   457→export default function MyResumesPage() {
+   458→   458→  const mounted = useMounted();
+   459→   459→  const resumes = useResumeStore((s) => s.resumes);
+   460→   460→  const activeResumeId = useResumeStore((s) => s.activeResumeId);
+   461→   461→  const active = useActiveResume();
+   462→   462→  const duplicateResume = useResumeStore((s) => s.duplicateResume);
+   463→   463→  const deleteResume = useResumeStore((s) => s.deleteResume);
+   464→   464→  const logScore = useResumeStore((s) => s.logScore);
+   465→   465→  const scoreHistory = useResumeStore((s) => s.scoreHistory);
+   466→   466→
+   467→   467→  const [query, setQuery] = React.useState("");
+   468→   468→  const [sort, setSort] = React.useState<SortKey>("recent");
+   469→   469→  const [tab, setTab] = React.useState<ResumeTab>("active");
+   470→   470→  const [healthFilter, setHealthFilter] = React.useState<HealthFilterKey>("all");
+   471→   471→  const [scanningStale, setScanningStale] = React.useState(false);
+   472→   472→  const [view, setView] = React.useState<ViewMode>("grid");
+   473→   473→  const [createOpen, setCreateOpen] = React.useState(false);
+   474→   474→  const [selectMode, setSelectMode] = React.useState(false);
+   475→   475→  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+   476→   476→  const [confirmDelete, setConfirmDelete] = React.useState(false);
+   477→   477→
+   478→   478→  const scoreMap = React.useMemo(() => {
+   479→   479→    const map = new Map<string, number>();
+   480→   480→    for (const r of resumes) map.set(r.id, atsAnalyze(r).score);
+   481→   481→    return map;
+   482→   482→  }, [resumes]);
+   483→   483→
+   484→   484→  /* View split. !!r.archived (never a truthy check on the key itself) so old
+   485→   485→     persisted state without the optional flag behaves as NOT archived. */
+   486→   486→  const activeResumes = React.useMemo(() => resumes.filter((r) => !r.archived), [resumes]);
+   487→   487→  const archivedResumes = React.useMemo(() => resumes.filter((r) => !!r.archived), [resumes]);
+   488→   488→
+   489→   489→  /* Health per resume, derived once and shared by the strip, the filter chips,
+   490→   490→     the filtering pipeline and the "Health first" sort. */
+   491→   491→  const healthById = React.useMemo(() => {
+   492→   492→    const now = Date.now();
+   493→   493→    const map = new Map<string, ResumeHealth>();
+   494→   494→    for (const r of resumes) map.set(r.id, resumeHealth(scoreHistory, r.id, now));
+   495→   495→    return map;
+   496→   496→  }, [resumes, scoreHistory]);
+   497→   497→
+   498→   498→  /* Health summary: scan RECENCY per resume (fresh < 24h, aging 1–7d,
+   499→   499→     stale > 7d) with never-scanned counted separately.
+   500→   500→     ACTIVE VIEW ONLY — archived resumes are excluded from the health strip,
+   501→   501→     the filter chips and the bulk stale re-scan by design: the health
+   502→   502→     workflow is about keeping the resumes you actually use fresh. */
+   503→   503→  const healthCounts = React.useMemo(() => {
+   504→   504→    let fresh = 0;
+   505→   505→    let aging = 0;
+   506→   506→    let stale = 0;
+   507→   507→    let never = 0;
+   508→   508→    for (const r of activeResumes) {
+   509→   509→      const h = healthById.get(r.id) ?? NEVER_HEALTH;
+   510→   510→      if (h.bucket === "fresh") fresh += 1;
+   511→   511→      else if (h.bucket === "aging") aging += 1;
+   512→   512→      else if (h.scanned) stale += 1;
+   513→   513→      else never += 1;
+   514→   514→    }
+   515→   515→    return { fresh, aging, stale, never };
+   516→   516→  }, [activeResumes, healthById]);
+   517→   517→
+   518→   518→  /* Bucket-true stale count: scanned-stale PLUS never-scanned (both are the
+   519→   519→     "stale" bucket), so chips, filter and bulk scan always agree. */
+   520→   520→  const staleScanCount = healthCounts.stale + healthCounts.never;
+   521→   521→
+   522→   522→  const visible = React.useMemo(() => {
+   523→   523→    const q = query.trim().toLowerCase();
+   524→   524→    /* The list always renders the CURRENT tab's resumes; health chips drive
+   525→   525→       the active view only, so the archived list is query+sort only. */
+   526→   526→    const source = tab === "active" ? activeResumes : archivedResumes;
+   527→   527→    const filtered = source.filter((r) => {
+   528→   528→      const matchesQuery =
+   529→   529→        !q ||
+   530→   530→        r.title.toLowerCase().includes(q) ||
+   531→   531→        r.personal.fullName.toLowerCase().includes(q) ||
+   532→   532→        r.personal.jobTitle.toLowerCase().includes(q);
+   533→   533→      if (!matchesQuery) return false;
+   534→   534→      if (tab !== "active" || healthFilter === "all") return true;
+   535→   535→      /* "stale" matches the whole stale bucket (old scans + never scanned). */
+   536→   536→      return (healthById.get(r.id) ?? NEVER_HEALTH).bucket === healthFilter;
+   537→   537→    });
+   538→   538→    const scoreOf = (id: string) => scoreMap.get(id) ?? 0;
+   539→   539→    switch (sort) {
+   540→   540→      case "name":
+   541→   541→        return [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+   542→   542→      case "ats":
+   543→   543→        return [...filtered].sort((a, b) => scoreOf(b.id) - scoreOf(a.id));
+   544→   544→      case "health":
+   545→   545→        /* fresh → aging → stale → never, then most recently edited first. */
+   546→   546→        return [...filtered].sort((a, b) => {
+   547→   547→          const rankA = healthRank(healthById.get(a.id) ?? NEVER_HEALTH);
+   548→   548→          const rankB = healthRank(healthById.get(b.id) ?? NEVER_HEALTH);
+   549→   549→          return rankA !== rankB ? rankA - rankB : b.updatedAt - a.updatedAt;
+   550→   550→        });
+   551→   551→      default:
+   552→   552→        return [...filtered].sort((a, b) => b.updatedAt - a.updatedAt);
+   553→   553→    }
+   554→   554→  }, [tab, activeResumes, archivedResumes, query, healthFilter, sort, scoreMap, healthById]);
+   555→   555→
+   556→   556→  /* One-click refresh of every stale-bucket resume (old + never scanned):
+   557→   557→     recomputes each ATS score, logs it and resets all freshness timers. The
+   558→   558→     600ms delay is intentional UX latency so the spinner state is perceivable.
+   559→   559→     Targets the ACTIVE view only — archived resumes leave the health workflow. */
+   560→   560→  const handleScanStale = () => {
+   561→   561→    if (scanningStale) return;
+   562→   562→    const now = Date.now();
+   563→   563→    const targets = activeResumes.filter((r) => (healthById.get(r.id) ?? NEVER_HEALTH).bucket === "stale");
+   564→   564→    if (targets.length === 0) return;
+   565→   565→    setScanningStale(true);
+   566→   566→    window.setTimeout(() => {
+   567→   567→      for (const r of targets) logScore(r.id, r.title, atsAnalyze(r).score);
+   568→   568→      setScanningStale(false);
+   569→   569→      toast.success(`Scanned ${targets.length} stale ${targets.length === 1 ? "resume" : "resumes"}`, {
+   570→   570→        description: "All freshness timers reset.",
+   571→   571→      });
+   572→   572→    }, 600);
+   573→   573→  };
+   574→   574→
+   575→   575→  /* Keep the selection honest when resumes disappear (per-card deletes, resets) */
+   576→   576→  React.useEffect(() => {
+   577→   577→    setSelected((prev) => {
+   578→   578→      if (prev.size === 0) return prev;
+   579→   579→      const ids = new Set(resumes.map((r) => r.id));
+   580→   580→      const next = new Set([...prev].filter((id) => ids.has(id)));
+   581→   581→      return next.size === prev.size ? prev : next;
+   582→   582→    });
+   583→   583→  }, [resumes]);
+   584→   584→
+   585→   585→  const exitSelectMode = React.useCallback(() => {
+   586→   586→    setSelectMode(false);
+   587→   587→    setSelected(new Set());
+   588→   588→  }, []);
+   589→   589→
+   590→   590→  /* Switching tabs also exits selection mode: a selection made in one view
+   591→   591→     must never be bulk-operated on while looking at the other one. */
+   592→   592→  const switchTab = React.useCallback(
+   593→   593→    (next: ResumeTab) => {
+   594→   594→      setTab(next);
+   595→   595→      exitSelectMode();
+   596→   596→    },
+   597→   597→    [exitSelectMode]
+   598→   598→  );
+   599→   599→
+   600→   600→  const toggleSelect = React.useCallback((id: string) => {
+   601→   601→    setSelected((prev) => {
+   602→   602→      const next = new Set(prev);
+   603→   603→      if (next.has(id)) next.delete(id);
+   604→   604→      else next.add(id);
+   605→   605→      return next;
+   606→   606→    });
+   607→   607→  }, []);
+   608→   608→
+   609→   609→  /* ESC exits selection mode — but never while an AlertDialog (bulk delete or
+   610→   610→     per-card delete) is open. The listener runs in the CAPTURE phase so it sees
+   611→   611→     the dialog before Radix's document-level handler closes it: Radix calls
+   612→   612→     onOpenChange(false) synchronously during the Escape dispatch (React 19
+   613→   613→     flush), so a bubble-phase DOM/state check would already observe the dialog
+   614→   614→     as gone and wrongly exit selection mode. */
+   615→   615→  React.useEffect(() => {
+   616→   616→    if (!selectMode) return;
+   617→   617→    const onKey = (e: KeyboardEvent) => {
+   618→   618→      if (e.key !== "Escape") return;
+   619→   619→      if (document.querySelector("[role=alertdialog]")) return;
+   620→   620→      exitSelectMode();
+   621→   621→    };
+   622→   622→    window.addEventListener("keydown", onKey, true);
+   623→   623→    return () => window.removeEventListener("keydown", onKey, true);
+   624→   624→  }, [selectMode, exitSelectMode]);
+   625→   625→
+   626→   626→  const handleBulkDuplicate = () => {
+   627→   627→    let ok = 0;
+   628→   628→    for (const id of selected) {
+   629→   629→      if (duplicateResume(id)) ok += 1;
+   630→   630→    }
+   631→   631→    if (ok > 0) {
+   632→   632→      toast.success(`Duplicated ${ok} ${ok === 1 ? "resume" : "resumes"}`, {
+   633→   633→        description: "Copies were added to the top of your list.",
+   634→   634→      });
+   635→   635→    }
+   636→   636→    /* Selection mode stays ON and the same set stays selected so users can continue. */
+   637→   637→  };
+   638→   638→
+   639→   639→  const handleBulkDelete = () => {
+   640→   640→    const ids = [...selected];
+   641→   641→    if (ids.length > 0) {
+   642→   642→      for (const id of ids) deleteResume(id);
+   643→   643→      /* deleteResume captured every snapshot (with original positions) before
+   644→   644→         removal — one toast with a single 7s Undo restores the whole batch. */
+   645→   645→      showDeleteUndoToast(takeUndoEntries());
+   646→   646→    }
+   647→   647→    setConfirmDelete(false);
+   648→   648→    setSelected(new Set());
+   649→   649→    setSelectMode(false);
+   650→   650→  };
+   651→   651→
+   652→   652→  if (!mounted) {
+   653→   653→    return <ResumesSkeleton />;
+   654→   654→  }
+   655→   655→
+   656→   656→  const hasAny = resumes.length > 0;
+   657→   657→  const selectedCount = selected.size;
+   658→   658→  const allVisibleSelected =
+   659→   659→    visible.length > 0 && visible.every((r) => selected.has(r.id));
+   660→   660→  const toggleSelectAll = () => {
+   661→   661→    setSelected(allVisibleSelected ? new Set() : new Set(visible.map((r) => r.id)));
+   662→   662→  };
+   663→   663→
+   664→   664→  return (
+   665→   665→    <div className="mx-auto max-w-6xl">
+   666→   666→      {/* Header row */}
+   667→   667→      <header className="flex flex-wrap items-center gap-3">
+   668→   668→        <div className="min-w-0">
+   669→   669→          <h1 className="flex items-center gap-2 font-display text-2xl font-bold tracking-tight">
+   670→   670→            My Resumes
+   671→   671→            <Badge
+   672→   672→              variant="secondary"
+   673→   673→              className="rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+   674→   674→            >
+   675→   675→              {resumes.length}
+   676→   676→            </Badge>
+   677→   677→          </h1>
+   678→   678→          <p className="mt-0.5 text-[13px] text-muted-foreground">
+   679→   679→            Manage, duplicate and track every version of your resume.
+   680→   680→          </p>
+   681→   681→        </div>
+   682→   682→
+   683→   683→        <div className="ml-auto flex flex-wrap items-center gap-2">
+   684→   684→          <div className="relative w-full sm:w-52">
+   685→   685→            <Search
+   686→   686→              className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+   687→   687→              aria-hidden="true"
+   688→   688→            />
+   689→   689→            <Input
+   690→   690→              value={query}
+   691→   691→              onChange={(e) => setQuery(e.target.value)}
+   692→   692→              placeholder="Search resumes…"
+   693→   693→              aria-label="Search resumes"
+   694→   694→              className="h-9 rounded-lg pl-8"
+   695→   695→            />
+   696→   696→          </div>
+   697→   697→
+   698→   698→          {/* Active / Archived view switch */}
+   699→   699→          <div
+   700→   700→            className="flex items-center rounded-full border p-0.5"
+   701→   701→            role="group"
+   702→   702→            aria-label="Active or archived resumes"
+   703→   703→            data-view-pills="true"
+   704→   704→          >
+   705→   705→            <ViewPill tabKey="active" count={activeResumes.length} current={tab} onSelect={switchTab} />
+   706→   706→            <ViewPill tabKey="archived" count={archivedResumes.length} current={tab} onSelect={switchTab} />
+   707→   707→          </div>
+   708→   708→
+   709→   709→          <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+   710→   710→            <SelectTrigger className="h-9 w-[164px] rounded-lg" aria-label="Sort resumes">
+   711→   711→              <SelectValue />
+   712→   712→            </SelectTrigger>
+   713→   713→            <SelectContent>
+   714→   714→              <SelectItem value="recent">Recently edited</SelectItem>
+   715→   715→              <SelectItem value="name">Name A-Z</SelectItem>
+   716→   716→              <SelectItem value="ats">ATS score</SelectItem>
+   717→   717→              <SelectItem value="health">Health first</SelectItem>
+   718→   718→            </SelectContent>
+   719→   719→          </Select>
+   720→   720→
+   721→   721→          <div
+   722→   722→            className="flex items-center rounded-lg border p-0.5"
+   723→   723→            role="group"
+   724→   724→            aria-label="View mode"
+   725→   725→          >
+   726→   726→            <Button
+   727→   727→              variant={view === "grid" ? "secondary" : "ghost"}
+   728→   728→              size="icon"
+   729→   729→              className="h-8 w-8"
+   730→   730→              onClick={() => setView("grid")}
+   731→   731→              aria-pressed={view === "grid"}
+   732→   732→              aria-label="Grid view"
+   733→   733→            >
+   734→   734→              <LayoutGrid className="h-4 w-4" />
+   735→   735→            </Button>
+   736→   736→            <Button
+   737→   737→              variant={view === "list" ? "secondary" : "ghost"}
+   738→   738→              size="icon"
+   739→   739→              className="h-8 w-8"
+   740→   740→              onClick={() => setView("list")}
+   741→   741→              aria-pressed={view === "list"}
+   742→   742→              aria-label="List view"
+   743→   743→            >
+   744→   744→              <List className="h-4 w-4" />
+   745→   745→            </Button>
+   746→   746→          </div>
+   747→   747→
+   748→   748→          {selectMode && (
+   749→   749→            <Button
+   750→   750→              variant="outline"
+   751→   751→              size="sm"
+   752→   752→              className="h-9 rounded-lg"
+   753→   753→              onClick={toggleSelectAll}
+   754→   754→            >
+   755→   755→              {allVisibleSelected ? "Deselect all" : "Select all"}
+   756→   756→            </Button>
+   757→   757→          )}
+   758→   758→
+   759→   759→          <Button
+   760→   760→            variant="ghost"
+   761→   761→            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+   762→   762→            aria-pressed={selectMode}
+   763→   763→            className="h-9 gap-1.5 rounded-lg"
+   764→   764→          >
+   765→   765→            {selectMode ? (
+   766→   766→              <X className="h-4 w-4" aria-hidden="true" />
+   767→   767→            ) : (
+   768→   768→              <CheckSquare className="h-4 w-4" aria-hidden="true" />
+   769→   769→            )}
+   770→   770→            {selectMode ? "Cancel" : "Select"}
+   771→   771→          </Button>
+   772→   772→
+   773→   773→          <Button
+   774→   774→            onClick={() => setCreateOpen(true)}
+   775→   775→            className="h-9 gap-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   776→   776→          >
+   777→   777→            <Plus className="h-4 w-4" aria-hidden="true" /> New Resume
+   778→   778→          </Button>
+   779→   779→        </div>
+   780→   780→      </header>
+   781→   781→
+   782→   782→      {/* Active resume hint */}
+   783→   783→      {active && (
+   784→   784→        <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+   785→   785→          <Sparkles className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+   786→   786→          Active resume: <span className="font-medium text-foreground">{active.title}</span>
+   787→   787→        </p>
+   788→   788→      )}
+   789→   789→
+   790→   790→      {/* Resume health summary — scan recency across the ACTIVE workspace.
+   791→   791→          Reflects the active view only: archived resumes are excluded from
+   792→   792→          every count here (and the strip hides entirely while the Archived
+   793→   793→          tab is shown, together with the bulk stale re-scan). */}
+   794→   794→      {tab === "active" && activeResumes.length > 0 && (
+   795→   795→        <motion.div
+   796→   796→          initial={{ opacity: 0, y: 8 }}
+   797→   797→          animate={{ opacity: 1, y: 0 }}
+   798→   798→          transition={{ duration: 0.35, ease: "easeOut" }}
+   799→   799→          className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border bg-card/60 px-3 py-2 text-[12px] tabular-nums text-muted-foreground"
+   800→   800→          data-health-strip="true"
+   801→   801→        >
+   802→   802→          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+   803→   803→            <Activity className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+   804→   804→            Resume health
+   805→   805→          </span>
+   806→   806→          <span className="h-3.5 w-px shrink-0 bg-border" aria-hidden="true" />
+   807→   807→          <HealthStat bucket="fresh" count={healthCounts.fresh} />
+   808→   808→          <HealthStat bucket="aging" count={healthCounts.aging} />
+   809→   809→          <HealthStat bucket="stale" count={healthCounts.stale} />
+   810→   810→          {healthCounts.never > 0 && <HealthStat bucket="never" count={healthCounts.never} />}
+   811→   811→
+   812→   812→          {/* Bulk action: re-scan every stale-bucket resume (old + never scanned) */}
+   813→   813→          {staleScanCount > 0 && (
+   814→   814→            <Button
+   815→   815→              variant="outline"
+   816→   816→              size="sm"
+   817→   817→              disabled={scanningStale}
+   818→   818→              onClick={handleScanStale}
+   819→   819→              data-scan-stale="true"
+   820→   820→              title={`Re-scan ${staleScanCount} stale or never-scanned ${staleScanCount === 1 ? "resume" : "resumes"} now`}
+   821→   821→              className="ml-auto h-6 gap-1.5 rounded-full border-emerald-500/40 bg-emerald-500/[0.07] px-2.5 text-[11.5px] font-medium leading-none text-emerald-700 shadow-[0_0_10px_rgba(16,185,129,0.28)] hover:border-emerald-500/60 hover:bg-emerald-500/15 hover:text-emerald-800 focus-visible:ring-emerald-500/60 focus-visible:ring-offset-1 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400 dark:shadow-[0_0_14px_rgba(16,185,129,0.3)] dark:hover:text-emerald-300"
+   822→   822→            >
+   823→   823→              {scanningStale ? (
+   824→   824→                <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+   825→   825→              ) : (
+   826→   826→                <RefreshCw className="h-3 w-3" aria-hidden="true" />
+   827→   827→              )}
+   828→   828→              {scanningStale ? "Scanning…" : `Scan ${staleScanCount} stale`}
+   829→   829→            </Button>
+   830→   830→          )}
+   831→   831→        </motion.div>
+   832→   832→      )}
+   833→   833→
+   834→   834→      {/* Health filter chips — combine with the search query (AND semantics).
+   835→   835→          Active view only (they filter the active list; hidden on Archived). */}
+   836→   836→      {tab === "active" && activeResumes.length > 0 && (
+   837→   837→        <div
+   838→   838→          className="mt-2 flex flex-wrap items-center gap-1.5"
+   839→   839→          role="group"
+   840→   840→          aria-label="Filter resumes by health"
+   841→   841→          data-health-chips="true"
+   842→   842→        >
+   843→   843→          <span className="mr-0.5 text-[11px] font-medium text-muted-foreground">Health:</span>
+   844→   844→          <HealthChip
+   845→   845→            filterKey="all"
+   846→   846→            count={activeResumes.length}
+   847→   847→            active={healthFilter === "all"}
+   848→   848→            onToggle={() => setHealthFilter("all")}
+   849→   849→          />
+   850→   850→          <HealthChip
+   851→   851→            filterKey="fresh"
+   852→   852→            count={healthCounts.fresh}
+   853→   853→            active={healthFilter === "fresh"}
+   854→   854→            onToggle={() => setHealthFilter(healthFilter === "fresh" ? "all" : "fresh")}
+   855→   855→          />
+   856→   856→          <HealthChip
+   857→   857→            filterKey="aging"
+   858→   858→            count={healthCounts.aging}
+   859→   859→            active={healthFilter === "aging"}
+   860→   860→            onToggle={() => setHealthFilter(healthFilter === "aging" ? "all" : "aging")}
+   861→   861→          />
+   862→   862→          <HealthChip
+   863→   863→            filterKey="stale"
+   864→   864→            count={staleScanCount}
+   865→   865→            active={healthFilter === "stale"}
+   866→   866→            onToggle={() => setHealthFilter(healthFilter === "stale" ? "all" : "stale")}
+   867→   867→          />
+   868→   868→        </div>
+   869→   869→      )}
+   870→   870→
+   871→   871→      {/* Content */}
+   872→   872→      {!hasAny ? (
+   873→   873→        <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-emerald-500/30 bg-emerald-500/[0.04] p-10 text-center">
+   874→   874→          <h3 className="font-display text-lg font-bold tracking-tight">No resumes yet</h3>
+   875→   875→          <p className="max-w-sm text-sm text-muted-foreground">
+   876→   876→            Create your first resume to unlock the builder, ATS scanner and cover letters.
+   877→   877→          </p>
+   878→   878→          <Button
+   879→   879→            onClick={() => setCreateOpen(true)}
+   880→   880→            className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   881→   881→          >
+   882→   882→            <Plus className="h-4 w-4" aria-hidden="true" /> New Resume
+   883→   883→          </Button>
+   884→   884→        </div>
+   885→   885→      ) : tab === "archived" && archivedResumes.length === 0 ? (
+   886→   886→        <div
+   887→   887→          className="mt-6 flex flex-col items-center gap-1.5 rounded-xl border border-dashed p-8 text-center"
+   888→   888→          data-archived-empty="true"
+   889→   889→        >
+   890→   890→          <Archive className="h-6 w-6 text-muted-foreground/40" aria-hidden="true" />
+   891→   891→          <p className="text-sm font-medium text-muted-foreground">Nothing archived yet</p>
+   892→   892→          <p className="max-w-xs text-xs text-muted-foreground/70">
+   893→   893→            Archive a resume from its actions menu to tuck it away without deleting it.
+   894→   894→          </p>
+   895→   895→        </div>
+   896→   896→      ) : tab === "active" && activeResumes.length === 0 ? (
+   897→   897→        <div
+   898→   898→          className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-emerald-500/30 bg-emerald-500/[0.04] p-10 text-center"
+   899→   899→          data-all-archived="true"
+   900→   900→        >
+   901→   901→          <Archive className="h-7 w-7 text-emerald-500/70" aria-hidden="true" />
+   902→   902→          <h3 className="font-display text-lg font-bold tracking-tight">All resumes are archived</h3>
+   903→   903→          <p className="max-w-sm text-sm text-muted-foreground">
+   904→   904→            Everything is tucked away in your archive — nothing was deleted.
+   905→   905→          </p>
+   906→   906→          <Button variant="outline" size="sm" onClick={() => switchTab("archived")}>
+   907→   907→            View archived
+   908→   908→          </Button>
+   909→   909→        </div>
+   910→   910→      ) : visible.length === 0 && tab === "active" && healthFilter !== "all" ? (
+   911→   911→        <div
+   912→   912→          className="mt-6 flex flex-col items-center gap-3 rounded-xl border border-dashed p-8 text-center"
+   913→   913→          data-health-empty={healthFilter}
+   914→   914→        >
+   915→   915→          <Activity className="h-7 w-7 text-muted-foreground/50" aria-hidden="true" />
+   916→   916→          <p className="text-sm text-muted-foreground">
+   917→   917→            {query.trim()
+   918→   918→              ? `No ${HEALTH_CHIP_LABEL[healthFilter].toLowerCase()} resumes match “${query.trim()}” right now.`
+   919→   919→              : `No ${HEALTH_CHIP_LABEL[healthFilter].toLowerCase()} resumes right now.`}
+   920→   920→          </p>
+   921→   921→          <Button variant="outline" size="sm" onClick={() => setHealthFilter("all")}>
+   922→   922→            Clear filter
+   923→   923→          </Button>
+   924→   924→        </div>
+   925→   925→      ) : visible.length === 0 ? (
+   926→   926→        <div className="mt-6 flex flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
+   927→   927→          <SearchX className="h-8 w-8 text-muted-foreground/60" aria-hidden="true" />
+   928→   928→          <p className="text-sm text-muted-foreground">
+   929→   929→            No resumes match “{query}”. Try a different search.
+   930→   930→          </p>
+   931→   931→          <Button variant="outline" size="sm" onClick={() => setQuery("")}>
+   932→   932→            Clear search
+   933→   933→          </Button>
+   934→   934→        </div>
+   935→   935→      ) : view === "grid" ? (
+   936→   936→        <div
+   937→   937→          className={cn(
+   938→   938→            "mt-6 grid min-h-[200px] max-h-[calc(100vh-250px)] gap-5 overflow-y-auto pr-1 scrollbar-thin sm:grid-cols-2 xl:grid-cols-3",
+   939→   939→            selectMode ? "pb-36" : "pb-4"
+   940→   940→          )}
+   941→   941→          role="list"
+   942→   942→          aria-label={tab === "active" ? "Resumes grid" : "Archived resumes grid"}
+   943→   943→        >
+   944→   944→          {visible.map((r: ResumeData, i: number) => (
+   945→   945→            <ResumeCard
+   946→   946→              key={r.id}
+   947→   947→              resume={r}
+   948→   948→              isActive={r.id === activeResumeId}
+   949→   949→              index={i}
+   950→   950→              selectionMode={selectMode}
+   951→   951→              selected={selected.has(r.id)}
+   952→   952→              onToggleSelect={toggleSelect}
+   953→   953→            />
+   954→   954→          ))}
+   955→   955→        </div>
+   956→   956→      ) : (
+   957→   957→        <div
+   958→   958→          className={cn(
+   959→   959→            "mt-6 min-h-[200px] max-h-[calc(100vh-250px)] space-y-3 overflow-y-auto pr-1 scrollbar-thin",
+   960→   960→            selectMode ? "pb-36" : "pb-4"
+   961→   961→          )}
+   962→   962→          role="list"
+   963→   963→          aria-label={tab === "active" ? "Resumes list" : "Archived resumes list"}
+   964→   964→        >
+   965→   965→          {visible.map((r: ResumeData, i: number) => (
+   966→   966→            <ResumeListRow
+   967→   967→              key={r.id}
+   968→   968→              resume={r}
+   969→   969→              isActive={r.id === activeResumeId}
+   970→   970→              index={i}
+   971→   971→              selectionMode={selectMode}
+   972→   972→              selected={selected.has(r.id)}
+   973→   973→              onToggleSelect={toggleSelect}
+   974→   974→            />
+   975→   975→          ))}
+   976→   976→        </div>
+   977→   977→      )}
+   978→   978→
+   979→   979→      <NewResumeDialog open={createOpen} onOpenChange={setCreateOpen} />
+   980→   980→
+   981→   981→      {/* Floating bulk action bar (multi-select mode) */}
+   982→   982→      <AnimatePresence>
+   983→   983→        {selectMode && (
+   984→   984→          <motion.div
+   985→   985→            key="bulk-bar"
+   986→   986→            initial={{ y: 20, opacity: 0 }}
+   987→   987→            animate={{ y: 0, opacity: 1 }}
+   988→   988→            exit={{ y: 20, opacity: 0 }}
+   989→   989→            transition={{ type: "spring", stiffness: 400, damping: 32 }}
+   990→   990→            className="pointer-events-none fixed inset-x-0 bottom-20 z-50 flex justify-center px-4 pb-[env(safe-area-inset-bottom)]"
+   991→   991→          >
+   992→   992→            <div
+   993→   993→              role="toolbar"
+   994→   994→              aria-label="Bulk actions"
+   995→   995→              className="pointer-events-auto flex items-center gap-2 rounded-full border bg-background/95 px-4 py-2.5 shadow-xl backdrop-blur"
+   996→   996→            >
+   997→   997→              <span
+   998→   998→                className="whitespace-nowrap text-sm font-medium tabular-nums"
+   999→   999→                aria-live="polite"
+  1000→  1000→              >
+  1001→  1001→                {selectedCount} selected
+  1002→  1002→              </span>
+  1003→  1003→
+  1004→  1004→              <span className="h-5 w-px shrink-0 bg-border" aria-hidden="true" />
+  1005→  1005→
+  1006→  1006→              <Button
+  1007→  1007→                variant="outline"
+  1008→  1008→                size="sm"
+  1009→  1009→                className="h-8 gap-1.5 rounded-full"
+  1010→  1010→                disabled={selectedCount === 0}
+  1011→  1011→                onClick={handleBulkDuplicate}
+  1012→  1012→              >
+  1013→  1013→                <Copy className="h-3.5 w-3.5" aria-hidden="true" /> Duplicate
+  1014→  1014→              </Button>
+  1015→  1015→
+  1016→  1016→              <Button
+  1017→  1017→                variant="outline"
+  1018→  1018→                size="sm"
+  1019→  1019→                disabled={selectedCount === 0}
+  1020→  1020→                onClick={() => setConfirmDelete(true)}
+  1021→  1021→                className="h-8 gap-1.5 rounded-full border-rose-500/40 text-rose-600 hover:border-rose-500/60 hover:bg-rose-500/10 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+  1022→  1022→              >
+  1023→  1023→                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Delete
+  1024→  1024→              </Button>
+  1025→  1025→
+  1026→  1026→              <Button
+  1027→  1027→                variant="ghost"
+  1028→  1028→                size="icon"
+  1029→  1029→                className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+  1030→  1030→                onClick={exitSelectMode}
+  1031→  1031→                aria-label="Exit selection mode"
+  1032→  1032→              >
+  1033→  1033→                <X className="h-4 w-4" aria-hidden="true" />
+  1034→  1034→              </Button>
+  1035→  1035→            </div>
+  1036→  1036→          </motion.div>
+  1037→  1037→        )}
+  1038→  1038→      </AnimatePresence>
+  1039→  1039→
+  1040→  1040→      {/* Bulk delete confirmation */}
+  1041→  1041→      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+  1042→  1042→        <AlertDialogContent>
+  1043→  1043→          <AlertDialogHeader>
+  1044→  1044→            <AlertDialogTitle>
+  1045→  1045→              Delete {selectedCount} {selectedCount === 1 ? "resume" : "resumes"}?
+  1046→  1046→            </AlertDialogTitle>
+  1047→  1047→            <AlertDialogDescription>
+  1048→  1048→              This removes {selectedCount === 1 ? "it" : "them"} and all of their content. You
+  1049→  1049→              will have a few seconds to undo afterwards.
+  1050→  1050→            </AlertDialogDescription>
+  1051→  1051→          </AlertDialogHeader>
+  1052→  1052→          <AlertDialogFooter>
+  1053→  1053→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1054→  1054→            <AlertDialogAction
+  1055→  1055→              className="bg-destructive text-white hover:bg-destructive/90"
+  1056→  1056→              onClick={handleBulkDelete}
+  1057→  1057→            >
+  1058→  1058→              Delete
+  1059→  1059→            </AlertDialogAction>
+  1060→  1060→          </AlertDialogFooter>
+  1061→  1061→        </AlertDialogContent>
+  1062→  1062→      </AlertDialog>
+  1063→  1063→    </div>
+  1064→  1064→  );
+  1065→  1065→}
+  1066→  1066→

@@ -1,0 +1,760 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { useRouter } from "next/navigation";
+     5→import { AnimatePresence, motion } from "framer-motion";
+     6→import { Activity, CheckSquare, Copy, LayoutGrid, List, Plus, Search, SearchX, Sparkles, Trash2, X } from "lucide-react";
+     7→import { toast } from "sonner";
+     8→import {
+     9→  ACCENT_PRESETS,
+    10→  TEMPLATE_META,
+    11→  useActiveResume,
+    12→  useResumeStore,
+    13→  type ResumeData,
+    14→  type TemplateId,
+    15→} from "@/lib/resume-store";
+    16→import { atsAnalyze } from "@/lib/mock-ai";
+    17→import { resumeHealth } from "@/lib/resume-health";
+    18→import { useMounted } from "@/lib/use-mounted";
+    19→import { cn } from "@/lib/utils";
+    20→import { Badge } from "@/components/ui/badge";
+    21→import { Button } from "@/components/ui/button";
+    22→import {
+    23→  AlertDialog,
+    24→  AlertDialogAction,
+    25→  AlertDialogCancel,
+    26→  AlertDialogContent,
+    27→  AlertDialogDescription,
+    28→  AlertDialogFooter,
+    29→  AlertDialogHeader,
+    30→  AlertDialogTitle,
+    31→} from "@/components/ui/alert-dialog";
+    32→import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+    33→import { Input } from "@/components/ui/input";
+    34→import { Label } from "@/components/ui/label";
+    35→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    36→import { Skeleton } from "@/components/ui/skeleton";
+    37→import { ResumeCard, ResumeListRow } from "@/components/dashboard/resume-card";
+    38→
+    39→/* ------------------------------------------------------------------ */
+    40→/* Types & constants                                                   */
+    41→/* ------------------------------------------------------------------ */
+    42→
+    43→type SortKey = "recent" | "name" | "ats";
+    44→type ViewMode = "grid" | "list";
+    45→type HealthCountBucket = "fresh" | "aging" | "stale" | "never";
+    46→
+    47→const TEMPLATE_IDS: TemplateId[] = ["modern", "classic", "minimal", "creative", "executive", "technical"];
+    48→
+    49→/* Health summary stat — colored dot + tabular count, dot separator travels
+    50→   with its item (after:) so wrapped lines never start with a stray “·”. */
+    51→const HEALTH_DOT: Record<HealthCountBucket, string> = {
+    52→  fresh: "bg-emerald-500",
+    53→  aging: "bg-amber-500",
+    54→  stale: "bg-rose-500",
+    55→  never: "bg-zinc-400 dark:bg-zinc-500",
+    56→};
+    57→const HEALTH_LABEL: Record<HealthCountBucket, string> = {
+    58→  fresh: "fresh",
+    59→  aging: "aging",
+    60→  stale: "stale",
+    61→  never: "never scanned",
+    62→};
+    63→
+    64→function HealthStat({ bucket, count }: { bucket: HealthCountBucket; count: number }) {
+    65→  return (
+    66→    <span
+    67→      data-health-count={bucket}
+    68→      className="inline-flex items-center gap-1.5 after:pl-2.5 after:text-muted-foreground/50 after:content-['·'] last:after:hidden"
+    69→    >
+    70→      <span className={cn("size-1.5 shrink-0 rounded-full", HEALTH_DOT[bucket])} aria-hidden="true" />
+    71→      <span>
+    72→        {count} {HEALTH_LABEL[bucket]}
+    73→      </span>
+    74→    </span>
+    75→  );
+    76→}
+    77→
+    78→/* Mini colored thumbnail used in the template radio-cards */
+    79→function GlyphLine({ w, light = false }: { w: number; light?: boolean }) {
+    80→  return (
+    81→    <span
+    82→      className={cn(
+    83→        "block h-[3px] shrink-0 rounded-full",
+    84→        light ? "bg-white/75" : "bg-neutral-400/70 dark:bg-neutral-500/70"
+    85→      )}
+    86→      style={{ width: `${w}%` }}
+    87→    />
+    88→  );
+    89→}
+    90→
+    91→function TemplateGlyph({
+    92→  template,
+    93→  accent,
+    94→  className,
+    95→}: {
+    96→  template: TemplateId;
+    97→  accent: string;
+    98→  className?: string;
+    99→}) {
+   100→  const base =
+   101→    "h-16 w-full overflow-hidden rounded-md border border-black/5 bg-neutral-50 dark:border-white/10 dark:bg-neutral-900";
+   102→
+   103→  switch (template) {
+   104→    case "modern":
+   105→      return (
+   106→        <div className={cn(base, "flex gap-1.5", className)}>
+   107→          <div className="flex w-1/3 flex-col gap-1 p-1.5" style={{ backgroundColor: accent }}>
+   108→            <GlyphLine w={85} light />
+   109→            <GlyphLine w={65} light />
+   110→            <GlyphLine w={75} light />
+   111→            <GlyphLine w={55} light />
+   112→          </div>
+   113→          <div className="flex-1 space-y-1 pt-1.5 pr-1.5">
+   114→            <GlyphLine w={70} />
+   115→            <GlyphLine w={90} />
+   116→            <GlyphLine w={85} />
+   117→            <GlyphLine w={60} />
+   118→            <GlyphLine w={78} />
+   119→          </div>
+   120→        </div>
+   121→      );
+   122→    case "classic":
+   123→      return (
+   124→        <div className={cn(base, "flex flex-col items-center gap-1", className)}>
+   125→          <span className="mt-2 h-3.5 w-3.5 rounded-full border-2" style={{ borderColor: accent }} />
+   126→          <GlyphLine w={45} />
+   127→          <span className="my-0.5 h-px w-2/3" style={{ backgroundColor: accent }} />
+   128→          <GlyphLine w={80} />
+   129→          <GlyphLine w={65} />
+   130→        </div>
+   131→      );
+   132→    case "minimal":
+   133→      return (
+   134→        <div className={cn(base, "flex flex-col justify-center gap-1.5 px-3", className)}>
+   135→          <GlyphLine w={38} />
+   136→          <GlyphLine w={86} />
+   137→          <GlyphLine w={72} />
+   138→          <GlyphLine w={52} />
+   139→        </div>
+   140→      );
+   141→    case "creative":
+   142→      return (
+   143→        <div className={cn(base, "space-y-1.5", className)}>
+   144→          <div className="-mx-px -mt-px flex h-4 items-center px-1.5" style={{ backgroundColor: accent }}>
+   145→            <GlyphLine w={42} light />
+   146→          </div>
+   147→          <div className="flex justify-between gap-1 px-1">
+   148→            {[26, 20, 24, 16].map((w, i) => (
+   149→              <span
+   150→                key={i}
+   151→                className="h-2 rounded-full"
+   152→                style={{ width: `${w}%`, backgroundColor: `${accent}40` }}
+   153→              />
+   154→            ))}
+   155→          </div>
+   156→          <div className="space-y-1 px-1 pb-1">
+   157→            <GlyphLine w={88} />
+   158→            <GlyphLine w={66} />
+   159→          </div>
+   160→        </div>
+   161→      );
+   162→    case "executive":
+   163→      return (
+   164→        <div className={cn(base, "space-y-1.5", className)}>
+   165→          <div className="-mx-px -mt-px flex h-6 flex-col justify-center gap-1 bg-neutral-800 px-1.5 dark:bg-neutral-700">
+   166→            <GlyphLine w={46} light />
+   167→            <GlyphLine w={30} light />
+   168→          </div>
+   169→          <div className="flex gap-2 px-1.5 pb-1">
+   170→            <div className="flex-1 space-y-1">
+   171→              <GlyphLine w={92} />
+   172→              <GlyphLine w={78} />
+   173→            </div>
+   174→            <div className="flex-1 space-y-1">
+   175→              <GlyphLine w={92} />
+   176→              <GlyphLine w={70} />
+   177→            </div>
+   178→          </div>
+   179→        </div>
+   180→      );
+   181→    case "technical":
+   182→      return (
+   183→        <div className={cn(base, "grid grid-cols-2 gap-x-2 gap-y-1 p-2", className)}>
+   184→          {Array.from({ length: 8 }).map((_, i) => (
+   185→            <GlyphLine key={i} w={((i * 17) % 38) + 56} />
+   186→          ))}
+   187→        </div>
+   188→      );
+   189→  }
+   190→}
+   191→
+   192→/* ------------------------------------------------------------------ */
+   193→/* New Resume dialog                                                   */
+   194→/* ------------------------------------------------------------------ */
+   195→
+   196→function NewResumeDialog({
+   197→  open,
+   198→  onOpenChange,
+   199→}: {
+   200→  open: boolean;
+   201→  onOpenChange: (open: boolean) => void;
+   202→}) {
+   203→  const router = useRouter();
+   204→  const createResume = useResumeStore((s) => s.createResume);
+   205→  const [title, setTitle] = React.useState("");
+   206→  const [template, setTemplate] = React.useState<TemplateId>("modern");
+   207→  const [accent, setAccent] = React.useState(ACCENT_PRESETS[0].value);
+   208→
+   209→  const handleCreate = () => {
+   210→    createResume(title.trim() || "Untitled Resume", template, accent);
+   211→    onOpenChange(false);
+   212→    setTitle("");
+   213→    toast.success("Resume created", { description: "Opening it in the Resume Studio…" });
+   214→    router.push("/dashboard/builder");
+   215→  };
+   216→
+   217→  return (
+   218→    <Dialog open={open} onOpenChange={onOpenChange}>
+   219→      <DialogContent className="sm:max-w-lg">
+   220→        <DialogHeader>
+   221→          <DialogTitle className="font-display">Create a new resume</DialogTitle>
+   222→          <DialogDescription>
+   223→            Pick a starting template and accent color — you can change both anytime.
+   224→          </DialogDescription>
+   225→        </DialogHeader>
+   226→
+   227→        <div className="space-y-5">
+   228→          <div className="space-y-2">
+   229→            <Label htmlFor="new-resume-title">Resume title</Label>
+   230→            <Input
+   231→              id="new-resume-title"
+   232→              placeholder="e.g. Senior Frontend Engineer — Google"
+   233→              value={title}
+   234→              onChange={(e) => setTitle(e.target.value)}
+   235→              onKeyDown={(e) => {
+   236→                if (e.key === "Enter") handleCreate();
+   237→              }}
+   238→              autoFocus
+   239→            />
+   240→          </div>
+   241→
+   242→          <div className="space-y-2">
+   243→            <Label>Template</Label>
+   244→            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label="Template">
+   245→              {TEMPLATE_IDS.map((t) => (
+   246→                <button
+   247→                  key={t}
+   248→                  type="button"
+   249→                  role="radio"
+   250→                  aria-checked={template === t}
+   251→                  onClick={() => setTemplate(t)}
+   252→                  className={cn(
+   253→                    "rounded-lg border bg-card p-2 text-left transition-all hover:border-emerald-500/50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   254→                    template === t &&
+   255→                      "border-emerald-500 bg-emerald-500/[0.04] ring-2 ring-emerald-500/25"
+   256→                  )}
+   257→                >
+   258→                  <TemplateGlyph template={t} accent={accent} />
+   259→                  <p className="mt-1.5 text-[12px] font-medium">{TEMPLATE_META[t].name}</p>
+   260→                </button>
+   261→              ))}
+   262→            </div>
+   263→          </div>
+   264→
+   265→          <div className="space-y-2">
+   266→            <Label>Accent color</Label>
+   267→            <div className="flex flex-wrap gap-2.5">
+   268→              {ACCENT_PRESETS.map((preset) => (
+   269→                <button
+   270→                  key={preset.value}
+   271→                  type="button"
+   272→                  title={preset.name}
+   273→                  aria-label={`${preset.name} accent`}
+   274→                  aria-pressed={accent === preset.value}
+   275→                  onClick={() => setAccent(preset.value)}
+   276→                  className={cn(
+   277→                    "h-7 w-7 rounded-full border border-black/10 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:border-white/10",
+   278→                    accent === preset.value &&
+   279→                      "scale-110 ring-2 ring-emerald-500 ring-offset-2 ring-offset-background"
+   280→                  )}
+   281→                  style={{ backgroundColor: preset.value }}
+   282→                />
+   283→              ))}
+   284→            </div>
+   285→          </div>
+   286→        </div>
+   287→
+   288→        <DialogFooter>
+   289→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   290→            Cancel
+   291→          </Button>
+   292→          <Button
+   293→            onClick={handleCreate}
+   294→            className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   295→          >
+   296→            <Plus className="h-4 w-4" aria-hidden="true" /> Create resume
+   297→          </Button>
+   298→        </DialogFooter>
+   299→      </DialogContent>
+   300→    </Dialog>
+   301→  );
+   302→}
+   303→
+   304→/* ------------------------------------------------------------------ */
+   305→/* Skeleton                                                            */
+   306→/* ------------------------------------------------------------------ */
+   307→
+   308→function ResumesSkeleton() {
+   309→  return (
+   310→    <div className="space-y-6" aria-busy="true" aria-label="Loading resumes">
+   311→      <div className="flex flex-wrap items-center gap-3">
+   312→        <Skeleton className="h-8 w-52" />
+   313→        <div className="ml-auto flex gap-2">
+   314→          <Skeleton className="h-9 w-56" />
+   315→          <Skeleton className="h-9 w-40" />
+   316→          <Skeleton className="h-9 w-24" />
+   317→        </div>
+   318→      </div>
+   319→      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+   320→        {Array.from({ length: 6 }).map((_, i) => (
+   321→          <Skeleton key={i} className="h-[360px] rounded-xl" />
+   322→        ))}
+   323→      </div>
+   324→    </div>
+   325→  );
+   326→}
+   327→
+   328→/* ------------------------------------------------------------------ */
+   329→/* Page                                                                */
+   330→/* ------------------------------------------------------------------ */
+   331→
+   332→export default function MyResumesPage() {
+   333→  const mounted = useMounted();
+   334→  const resumes = useResumeStore((s) => s.resumes);
+   335→  const activeResumeId = useResumeStore((s) => s.activeResumeId);
+   336→  const active = useActiveResume();
+   337→  const duplicateResume = useResumeStore((s) => s.duplicateResume);
+   338→  const deleteResume = useResumeStore((s) => s.deleteResume);
+   339→  const scoreHistory = useResumeStore((s) => s.scoreHistory);
+   340→
+   341→  const [query, setQuery] = React.useState("");
+   342→  const [sort, setSort] = React.useState<SortKey>("recent");
+   343→  const [view, setView] = React.useState<ViewMode>("grid");
+   344→  const [createOpen, setCreateOpen] = React.useState(false);
+   345→  const [selectMode, setSelectMode] = React.useState(false);
+   346→  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+   347→  const [confirmDelete, setConfirmDelete] = React.useState(false);
+   348→
+   349→  const scoreMap = React.useMemo(() => {
+   350→    const map = new Map<string, number>();
+   351→    for (const r of resumes) map.set(r.id, atsAnalyze(r).score);
+   352→    return map;
+   353→  }, [resumes]);
+   354→
+   355→  /* Health summary: scan RECENCY per resume (fresh < 24h, aging 1–7d,
+   356→     stale > 7d) with never-scanned counted separately. */
+   357→  const healthCounts = React.useMemo(() => {
+   358→    const now = Date.now();
+   359→    let fresh = 0;
+   360→    let aging = 0;
+   361→    let stale = 0;
+   362→    let never = 0;
+   363→    for (const r of resumes) {
+   364→      const h = resumeHealth(scoreHistory, r.id, now);
+   365→      if (h.bucket === "fresh") fresh += 1;
+   366→      else if (h.bucket === "aging") aging += 1;
+   367→      else if (h.scanned) stale += 1;
+   368→      else never += 1;
+   369→    }
+   370→    return { fresh, aging, stale, never };
+   371→  }, [resumes, scoreHistory]);
+   372→
+   373→  const visible = React.useMemo(() => {
+   374→    const q = query.trim().toLowerCase();
+   375→    const filtered = resumes.filter(
+   376→      (r) =>
+   377→        !q ||
+   378→        r.title.toLowerCase().includes(q) ||
+   379→        r.personal.fullName.toLowerCase().includes(q) ||
+   380→        r.personal.jobTitle.toLowerCase().includes(q)
+   381→    );
+   382→    const scoreOf = (id: string) => scoreMap.get(id) ?? 0;
+   383→    switch (sort) {
+   384→      case "name":
+   385→        return [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+   386→      case "ats":
+   387→        return [...filtered].sort((a, b) => scoreOf(b.id) - scoreOf(a.id));
+   388→      default:
+   389→        return [...filtered].sort((a, b) => b.updatedAt - a.updatedAt);
+   390→    }
+   391→  }, [resumes, query, sort, scoreMap]);
+   392→
+   393→  /* Keep the selection honest when resumes disappear (per-card deletes, resets) */
+   394→  React.useEffect(() => {
+   395→    setSelected((prev) => {
+   396→      if (prev.size === 0) return prev;
+   397→      const ids = new Set(resumes.map((r) => r.id));
+   398→      const next = new Set([...prev].filter((id) => ids.has(id)));
+   399→      return next.size === prev.size ? prev : next;
+   400→    });
+   401→  }, [resumes]);
+   402→
+   403→  const exitSelectMode = React.useCallback(() => {
+   404→    setSelectMode(false);
+   405→    setSelected(new Set());
+   406→  }, []);
+   407→
+   408→  const toggleSelect = React.useCallback((id: string) => {
+   409→    setSelected((prev) => {
+   410→      const next = new Set(prev);
+   411→      if (next.has(id)) next.delete(id);
+   412→      else next.add(id);
+   413→      return next;
+   414→    });
+   415→  }, []);
+   416→
+   417→  /* ESC exits selection mode — but never while an AlertDialog (bulk delete or
+   418→     per-card delete) is open. The listener runs in the CAPTURE phase so it sees
+   419→     the dialog before Radix's document-level handler closes it: Radix calls
+   420→     onOpenChange(false) synchronously during the Escape dispatch (React 19
+   421→     flush), so a bubble-phase DOM/state check would already observe the dialog
+   422→     as gone and wrongly exit selection mode. */
+   423→  React.useEffect(() => {
+   424→    if (!selectMode) return;
+   425→    const onKey = (e: KeyboardEvent) => {
+   426→      if (e.key !== "Escape") return;
+   427→      if (document.querySelector("[role=alertdialog]")) return;
+   428→      exitSelectMode();
+   429→    };
+   430→    window.addEventListener("keydown", onKey, true);
+   431→    return () => window.removeEventListener("keydown", onKey, true);
+   432→  }, [selectMode, exitSelectMode]);
+   433→
+   434→  const handleBulkDuplicate = () => {
+   435→    let ok = 0;
+   436→    for (const id of selected) {
+   437→      if (duplicateResume(id)) ok += 1;
+   438→    }
+   439→    if (ok > 0) {
+   440→      toast.success(`Duplicated ${ok} ${ok === 1 ? "resume" : "resumes"}`, {
+   441→        description: "Copies were added to the top of your list.",
+   442→      });
+   443→    }
+   444→    /* Selection mode stays ON and the same set stays selected so users can continue. */
+   445→  };
+   446→
+   447→  const handleBulkDelete = () => {
+   448→    const ids = [...selected];
+   449→    for (const id of ids) deleteResume(id);
+   450→    if (ids.length > 0) {
+   451→      toast.success(`Deleted ${ids.length} ${ids.length === 1 ? "resume" : "resumes"}`);
+   452→    }
+   453→    setConfirmDelete(false);
+   454→    setSelected(new Set());
+   455→    setSelectMode(false);
+   456→  };
+   457→
+   458→  if (!mounted) {
+   459→    return <ResumesSkeleton />;
+   460→  }
+   461→
+   462→  const hasAny = resumes.length > 0;
+   463→  const selectedCount = selected.size;
+   464→  const allVisibleSelected =
+   465→    visible.length > 0 && visible.every((r) => selected.has(r.id));
+   466→  const toggleSelectAll = () => {
+   467→    setSelected(allVisibleSelected ? new Set() : new Set(visible.map((r) => r.id)));
+   468→  };
+   469→
+   470→  return (
+   471→    <div className="mx-auto max-w-6xl">
+   472→      {/* Header row */}
+   473→      <header className="flex flex-wrap items-center gap-3">
+   474→        <div className="min-w-0">
+   475→          <h1 className="flex items-center gap-2 font-display text-2xl font-bold tracking-tight">
+   476→            My Resumes
+   477→            <Badge
+   478→              variant="secondary"
+   479→              className="rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+   480→            >
+   481→              {resumes.length}
+   482→            </Badge>
+   483→          </h1>
+   484→          <p className="mt-0.5 text-[13px] text-muted-foreground">
+   485→            Manage, duplicate and track every version of your resume.
+   486→          </p>
+   487→        </div>
+   488→
+   489→        <div className="ml-auto flex flex-wrap items-center gap-2">
+   490→          <div className="relative w-full sm:w-52">
+   491→            <Search
+   492→              className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+   493→              aria-hidden="true"
+   494→            />
+   495→            <Input
+   496→              value={query}
+   497→              onChange={(e) => setQuery(e.target.value)}
+   498→              placeholder="Search resumes…"
+   499→              aria-label="Search resumes"
+   500→              className="h-9 rounded-lg pl-8"
+   501→            />
+   502→          </div>
+   503→
+   504→          <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+   505→            <SelectTrigger className="h-9 w-[164px] rounded-lg" aria-label="Sort resumes">
+   506→              <SelectValue />
+   507→            </SelectTrigger>
+   508→            <SelectContent>
+   509→              <SelectItem value="recent">Recently edited</SelectItem>
+   510→              <SelectItem value="name">Name A-Z</SelectItem>
+   511→              <SelectItem value="ats">ATS score</SelectItem>
+   512→            </SelectContent>
+   513→          </Select>
+   514→
+   515→          <div
+   516→            className="flex items-center rounded-lg border p-0.5"
+   517→            role="group"
+   518→            aria-label="View mode"
+   519→          >
+   520→            <Button
+   521→              variant={view === "grid" ? "secondary" : "ghost"}
+   522→              size="icon"
+   523→              className="h-8 w-8"
+   524→              onClick={() => setView("grid")}
+   525→              aria-pressed={view === "grid"}
+   526→              aria-label="Grid view"
+   527→            >
+   528→              <LayoutGrid className="h-4 w-4" />
+   529→            </Button>
+   530→            <Button
+   531→              variant={view === "list" ? "secondary" : "ghost"}
+   532→              size="icon"
+   533→              className="h-8 w-8"
+   534→              onClick={() => setView("list")}
+   535→              aria-pressed={view === "list"}
+   536→              aria-label="List view"
+   537→            >
+   538→              <List className="h-4 w-4" />
+   539→            </Button>
+   540→          </div>
+   541→
+   542→          {selectMode && (
+   543→            <Button
+   544→              variant="outline"
+   545→              size="sm"
+   546→              className="h-9 rounded-lg"
+   547→              onClick={toggleSelectAll}
+   548→            >
+   549→              {allVisibleSelected ? "Deselect all" : "Select all"}
+   550→            </Button>
+   551→          )}
+   552→
+   553→          <Button
+   554→            variant="ghost"
+   555→            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+   556→            aria-pressed={selectMode}
+   557→            className="h-9 gap-1.5 rounded-lg"
+   558→          >
+   559→            {selectMode ? (
+   560→              <X className="h-4 w-4" aria-hidden="true" />
+   561→            ) : (
+   562→              <CheckSquare className="h-4 w-4" aria-hidden="true" />
+   563→            )}
+   564→            {selectMode ? "Cancel" : "Select"}
+   565→          </Button>
+   566→
+   567→          <Button
+   568→            onClick={() => setCreateOpen(true)}
+   569→            className="h-9 gap-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   570→          >
+   571→            <Plus className="h-4 w-4" aria-hidden="true" /> New Resume
+   572→          </Button>
+   573→        </div>
+   574→      </header>
+   575→
+   576→      {/* Active resume hint */}
+   577→      {active && (
+   578→        <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+   579→          <Sparkles className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+   580→          Active resume: <span className="font-medium text-foreground">{active.title}</span>
+   581→        </p>
+   582→      )}
+   583→
+   584→      {/* Resume health summary — scan recency across the workspace */}
+   585→      {hasAny && (
+   586→        <motion.div
+   587→          initial={{ opacity: 0, y: 8 }}
+   588→          animate={{ opacity: 1, y: 0 }}
+   589→          transition={{ duration: 0.35, ease: "easeOut" }}
+   590→          className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border bg-card/60 px-3 py-2 text-[12px] tabular-nums text-muted-foreground"
+   591→          data-health-strip="true"
+   592→        >
+   593→          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+   594→            <Activity className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+   595→            Resume health
+   596→          </span>
+   597→          <span className="h-3.5 w-px shrink-0 bg-border" aria-hidden="true" />
+   598→          <HealthStat bucket="fresh" count={healthCounts.fresh} />
+   599→          <HealthStat bucket="aging" count={healthCounts.aging} />
+   600→          <HealthStat bucket="stale" count={healthCounts.stale} />
+   601→          {healthCounts.never > 0 && <HealthStat bucket="never" count={healthCounts.never} />}
+   602→        </motion.div>
+   603→      )}
+   604→
+   605→      {/* Content */}
+   606→      {!hasAny ? (
+   607→        <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-emerald-500/30 bg-emerald-500/[0.04] p-10 text-center">
+   608→          <h3 className="font-display text-lg font-bold tracking-tight">No resumes yet</h3>
+   609→          <p className="max-w-sm text-sm text-muted-foreground">
+   610→            Create your first resume to unlock the builder, ATS scanner and cover letters.
+   611→          </p>
+   612→          <Button
+   613→            onClick={() => setCreateOpen(true)}
+   614→            className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-700"
+   615→          >
+   616→            <Plus className="h-4 w-4" aria-hidden="true" /> New Resume
+   617→          </Button>
+   618→        </div>
+   619→      ) : visible.length === 0 ? (
+   620→        <div className="mt-6 flex flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
+   621→          <SearchX className="h-8 w-8 text-muted-foreground/60" aria-hidden="true" />
+   622→          <p className="text-sm text-muted-foreground">
+   623→            No resumes match “{query}”. Try a different search.
+   624→          </p>
+   625→          <Button variant="outline" size="sm" onClick={() => setQuery("")}>
+   626→            Clear search
+   627→          </Button>
+   628→        </div>
+   629→      ) : view === "grid" ? (
+   630→        <div
+   631→          className={cn(
+   632→            "mt-6 grid min-h-[200px] max-h-[calc(100vh-250px)] gap-5 overflow-y-auto pr-1 scrollbar-thin sm:grid-cols-2 xl:grid-cols-3",
+   633→            selectMode ? "pb-36" : "pb-4"
+   634→          )}
+   635→          role="list"
+   636→          aria-label="Resumes grid"
+   637→        >
+   638→          {visible.map((r: ResumeData, i: number) => (
+   639→            <ResumeCard
+   640→              key={r.id}
+   641→              resume={r}
+   642→              isActive={r.id === activeResumeId}
+   643→              index={i}
+   644→              selectionMode={selectMode}
+   645→              selected={selected.has(r.id)}
+   646→              onToggleSelect={toggleSelect}
+   647→            />
+   648→          ))}
+   649→        </div>
+   650→      ) : (
+   651→        <div
+   652→          className={cn(
+   653→            "mt-6 min-h-[200px] max-h-[calc(100vh-250px)] space-y-3 overflow-y-auto pr-1 scrollbar-thin",
+   654→            selectMode ? "pb-36" : "pb-4"
+   655→          )}
+   656→          role="list"
+   657→          aria-label="Resumes list"
+   658→        >
+   659→          {visible.map((r: ResumeData, i: number) => (
+   660→            <ResumeListRow
+   661→              key={r.id}
+   662→              resume={r}
+   663→              isActive={r.id === activeResumeId}
+   664→              index={i}
+   665→              selectionMode={selectMode}
+   666→              selected={selected.has(r.id)}
+   667→              onToggleSelect={toggleSelect}
+   668→            />
+   669→          ))}
+   670→        </div>
+   671→      )}
+   672→
+   673→      <NewResumeDialog open={createOpen} onOpenChange={setCreateOpen} />
+   674→
+   675→      {/* Floating bulk action bar (multi-select mode) */}
+   676→      <AnimatePresence>
+   677→        {selectMode && (
+   678→          <motion.div
+   679→            key="bulk-bar"
+   680→            initial={{ y: 20, opacity: 0 }}
+   681→            animate={{ y: 0, opacity: 1 }}
+   682→            exit={{ y: 20, opacity: 0 }}
+   683→            transition={{ type: "spring", stiffness: 400, damping: 32 }}
+   684→            className="pointer-events-none fixed inset-x-0 bottom-20 z-50 flex justify-center px-4 pb-[env(safe-area-inset-bottom)]"
+   685→          >
+   686→            <div
+   687→              role="toolbar"
+   688→              aria-label="Bulk actions"
+   689→              className="pointer-events-auto flex items-center gap-2 rounded-full border bg-background/95 px-4 py-2.5 shadow-xl backdrop-blur"
+   690→            >
+   691→              <span
+   692→                className="whitespace-nowrap text-sm font-medium tabular-nums"
+   693→                aria-live="polite"
+   694→              >
+   695→                {selectedCount} selected
+   696→              </span>
+   697→
+   698→              <span className="h-5 w-px shrink-0 bg-border" aria-hidden="true" />
+   699→
+   700→              <Button
+   701→                variant="outline"
+   702→                size="sm"
+   703→                className="h-8 gap-1.5 rounded-full"
+   704→                disabled={selectedCount === 0}
+   705→                onClick={handleBulkDuplicate}
+   706→              >
+   707→                <Copy className="h-3.5 w-3.5" aria-hidden="true" /> Duplicate
+   708→              </Button>
+   709→
+   710→              <Button
+   711→                variant="outline"
+   712→                size="sm"
+   713→                disabled={selectedCount === 0}
+   714→                onClick={() => setConfirmDelete(true)}
+   715→                className="h-8 gap-1.5 rounded-full border-rose-500/40 text-rose-600 hover:border-rose-500/60 hover:bg-rose-500/10 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+   716→              >
+   717→                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Delete
+   718→              </Button>
+   719→
+   720→              <Button
+   721→                variant="ghost"
+   722→                size="icon"
+   723→                className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+   724→                onClick={exitSelectMode}
+   725→                aria-label="Exit selection mode"
+   726→              >
+   727→                <X className="h-4 w-4" aria-hidden="true" />
+   728→              </Button>
+   729→            </div>
+   730→          </motion.div>
+   731→        )}
+   732→      </AnimatePresence>
+   733→
+   734→      {/* Bulk delete confirmation */}
+   735→      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+   736→        <AlertDialogContent>
+   737→          <AlertDialogHeader>
+   738→            <AlertDialogTitle>
+   739→              Delete {selectedCount} {selectedCount === 1 ? "resume" : "resumes"}?
+   740→            </AlertDialogTitle>
+   741→            <AlertDialogDescription>
+   742→              This permanently removes {selectedCount === 1 ? "it" : "them"} and all of their
+   743→              content. This action cannot be undone.
+   744→            </AlertDialogDescription>
+   745→          </AlertDialogHeader>
+   746→          <AlertDialogFooter>
+   747→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   748→            <AlertDialogAction
+   749→              className="bg-destructive text-white hover:bg-destructive/90"
+   750→              onClick={handleBulkDelete}
+   751→            >
+   752→              Delete
+   753→            </AlertDialogAction>
+   754→          </AlertDialogFooter>
+   755→        </AlertDialogContent>
+   756→      </AlertDialog>
+   757→    </div>
+   758→  );
+   759→}
+   760→

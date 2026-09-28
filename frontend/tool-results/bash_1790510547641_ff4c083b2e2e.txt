@@ -1,0 +1,814 @@
+     1→"use client";
+     2→
+     3→import { create } from "zustand";
+     4→import { persist, createJSONStorage } from "zustand/middleware";
+     5→
+     6→/* ============================== Types ============================== */
+     7→
+     8→export type TemplateId =
+     9→  | "modern"
+    10→  | "classic"
+    11→  | "minimal"
+    12→  | "creative"
+    13→  | "executive"
+    14→  | "technical";
+    15→
+    16→export const TEMPLATE_META: Record<
+    17→  TemplateId,
+    18→  { name: string; description: string; tag: string }
+    19→> = {
+    20→  modern: {
+    21→    name: "Modern",
+    22→    description: "Two-column layout with a vibrant accent sidebar. Perfect for tech roles.",
+    23→    tag: "Most Popular",
+    24→  },
+    25→  classic: {
+    26→    name: "Classic",
+    27→    description: "Timeless single-column design trusted by recruiters for decades.",
+    28→    tag: "Safe Choice",
+    29→  },
+    30→  minimal: {
+    31→    name: "Minimal",
+    32→    description: "Ultra-clean whitespace-first layout that lets your content shine.",
+    33→    tag: "Clean",
+    34→  },
+    35→  creative: {
+    36→    name: "Creative",
+    37→    description: "Bold header block with skill chips for design-forward careers.",
+    38→    tag: "Bold",
+    39→  },
+    40→  executive: {
+    41→    name: "Executive",
+    42→    description: "Commanding dark header and refined typography for senior roles.",
+    43→    tag: "Senior",
+    44→  },
+    45→  technical: {
+    46→    name: "Technical",
+    47→    description: "Dense, keyword-rich engineering layout optimized for ATS parsing.",
+    48→    tag: "ATS-Ready",
+    49→  },
+    50→};
+    51→
+    52→export interface PersonalInfo {
+    53→  fullName: string;
+    54→  jobTitle: string;
+    55→  email: string;
+    56→  phone: string;
+    57→  location: string;
+    58→  website: string;
+    59→  linkedin: string;
+    60→  github: string;
+    61→}
+    62→
+    63→export interface ExperienceItem {
+    64→  id: string;
+    65→  company: string;
+    66→  role: string;
+    67→  location: string;
+    68→  startDate: string; // e.g. "2021-06"
+    69→  endDate: string;
+    70→  current: boolean;
+    71→  bullets: string[];
+    72→}
+    73→
+    74→export interface EducationItem {
+    75→  id: string;
+    76→  school: string;
+    77→  degree: string;
+    78→  field: string;
+    79→  startDate: string;
+    80→  endDate: string;
+    81→  gpa: string;
+    82→}
+    83→
+    84→export interface SkillItem {
+    85→  id: string;
+    86→  name: string;
+    87→  level: number; // 1..5
+    88→}
+    89→
+    90→export interface ProjectItem {
+    91→  id: string;
+    92→  name: string;
+    93→  url: string;
+    94→  description: string;
+    95→  tech: string[];
+    96→}
+    97→
+    98→export interface CertificationItem {
+    99→  id: string;
+   100→  name: string;
+   101→  issuer: string;
+   102→  year: string;
+   103→}
+   104→
+   105→export interface LanguageItem {
+   106→  id: string;
+   107→  name: string;
+   108→  level: string;
+   109→}
+   110→
+   111→export interface ResumeData {
+   112→  id: string;
+   113→  title: string;
+   114→  template: TemplateId;
+   115→  accent: string; // hex
+   116→  updatedAt: number;
+   117→  personal: PersonalInfo;
+   118→  summary: string;
+   119→  experience: ExperienceItem[];
+   120→  education: EducationItem[];
+   121→  skills: SkillItem[];
+   122→  projects: ProjectItem[];
+   123→  certifications: CertificationItem[];
+   124→  languages: LanguageItem[];
+   125→}
+   126→
+   127→/* ============================== Helpers ============================== */
+   128→
+   129→export function uid(): string {
+   130→  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+   131→}
+   132→
+   133→export const ACCENT_PRESETS = [
+   134→  { name: "Emerald", value: "#10b981" },
+   135→  { name: "Teal", value: "#14b8a6" },
+   136→  { name: "Violet", value: "#8b5cf6" },
+   137→  { name: "Rose", value: "#f43f5e" },
+   138→  { name: "Amber", value: "#f59e0b" },
+   139→  { name: "Slate", value: "#475569" },
+   140→  { name: "Orange", value: "#f97316" },
+   141→  { name: "Fuchsia", value: "#d946ef" },
+   142→];
+   143→
+   144→export function formatMonth(value: string): string {
+   145→  if (!value) return "";
+   146→  const [y, m] = value.split("-");
+   147→  if (!y) return value;
+   148→  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+   149→  if (!m) return y;
+   150→  const idx = parseInt(m, 10) - 1;
+   151→  return `${months[idx] ?? ""} ${y}`;
+   152→}
+   153→
+   154→export function emptyResume(title = "Untitled Resume", template: TemplateId = "modern", accent = "#10b981"): ResumeData {
+   155→  return {
+   156→    id: uid(),
+   157→    title,
+   158→    template,
+   159→    accent,
+   160→    updatedAt: Date.now(),
+   161→    personal: {
+   162→      fullName: "",
+   163→      jobTitle: "",
+   164→      email: "",
+   165→      phone: "",
+   166→      location: "",
+   167→      website: "",
+   168→      linkedin: "",
+   169→      github: "",
+   170→    },
+   171→    summary: "",
+   172→    experience: [],
+   173→    education: [],
+   174→    skills: [],
+   175→    projects: [],
+   176→    certifications: [],
+   177→    languages: [],
+   178→  };
+   179→}
+   180→
+   181→/* ============================== Seed data ============================== */
+   182→
+   183→function seedResume1(): ResumeData {
+   184→  return {
+   185→    id: "seed-alex",
+   186→    title: "Senior Frontend Engineer — Google",
+   187→    template: "modern",
+   188→    accent: "#10b981",
+   189→    updatedAt: Date.now() - 1000 * 60 * 60 * 5,
+   190→    personal: {
+   191→      fullName: "Alexander Chen",
+   192→      jobTitle: "Senior Frontend Engineer",
+   193→      email: "alex.chen@email.com",
+   194→      phone: "+1 (415) 555-0132",
+   195→      location: "San Francisco, CA",
+   196→      website: "alexchen.dev",
+   197→      linkedin: "linkedin.com/in/alexchen",
+   198→      github: "github.com/alexchen",
+   199→    },
+   200→    summary:
+   201→      "Senior Frontend Engineer with 7+ years of experience architecting high-performance web applications used by 2M+ monthly users. Specialized in React, TypeScript, and design systems. Reduced page load times by 43% and led a team of 6 engineers shipping 30+ production features per quarter.",
+   202→    experience: [
+   203→      {
+   204→        id: uid(),
+   205→        company: "Nova Digital",
+   206→        role: "Senior Frontend Engineer",
+   207→        location: "San Francisco, CA",
+   208→        startDate: "2021-06",
+   209→        endDate: "",
+   210→        current: true,
+   211→        bullets: [
+   212→          "Led migration of a legacy AngularJS monolith to Next.js, improving Core Web Vitals scores by 43% and cutting bounce rate by 18%",
+   213→          "Architected a company-wide design system adopted by 5 product teams, reducing UI development time by 60%",
+   214→          "Mentored 6 junior engineers; 3 were promoted within 18 months",
+   215→          "Introduced automated accessibility testing that raised WCAG compliance from 71% to 98%",
+   216→        ],
+   217→      },
+   218→      {
+   219→        id: uid(),
+   220→        company: "PixelWorks",
+   221→        role: "Frontend Engineer",
+   222→        location: "Seattle, WA",
+   223→        startDate: "2018-03",
+   224→        endDate: "2021-05",
+   225→        current: false,
+   226→        bullets: [
+   227→          "Built a real-time collaboration dashboard serving 200K daily active users with 99.95% uptime",
+   228→          "Reduced bundle size by 38% through code-splitting and dependency audits",
+   229→          "Shipped 30+ customer-facing features across 12 product releases",
+   230→        ],
+   231→      },
+   232→      {
+   233→        id: uid(),
+   234→        company: "BrightLabs",
+   235→        role: "Web Developer",
+   236→        location: "Portland, OR",
+   237→        startDate: "2016-07",
+   238→        endDate: "2018-02",
+   239→        current: false,
+   240→        bullets: [
+   241→          "Developed responsive marketing sites that lifted lead conversion by 25%",
+   242→          "Automated image optimization pipeline saving 12 hours of manual work weekly",
+   243→        ],
+   244→      },
+   245→    ],
+   246→    education: [
+   247→      {
+   248→        id: uid(),
+   249→        school: "University of California, Berkeley",
+   250→        degree: "B.S.",
+   251→        field: "Computer Science",
+   252→        startDate: "2012-08",
+   253→        endDate: "2016-05",
+   254→        gpa: "3.8",
+   255→      },
+   256→    ],
+   257→    skills: [
+   258→      { id: uid(), name: "React", level: 5 },
+   259→      { id: uid(), name: "TypeScript", level: 5 },
+   260→      { id: uid(), name: "Next.js", level: 5 },
+   261→      { id: uid(), name: "Tailwind CSS", level: 4 },
+   262→      { id: uid(), name: "GraphQL", level: 4 },
+   263→      { id: uid(), name: "Node.js", level: 4 },
+   264→      { id: uid(), name: "Testing (Jest/RTL)", level: 4 },
+   265→      { id: uid(), name: "CI/CD", level: 3 },
+   266→    ],
+   267→    projects: [
+   268→      {
+   269→        id: uid(),
+   270→        name: "Design System Pro",
+   271→        url: "github.com/alexchen/design-system-pro",
+   272→        description: "Open-source React component library with 4.2K GitHub stars, used by 300+ projects.",
+   273→        tech: ["React", "TypeScript", "Storybook"],
+   274→      },
+   275→      {
+   276→        id: uid(),
+   277→        name: "Realtime Collab",
+   278→        url: "realtimecollab.app",
+   279→        description: "Multiplayer whiteboard with CRDT-based sync, handling 10K concurrent sessions.",
+   280→        tech: ["WebSockets", "CRDT", "Canvas API"],
+   281→      },
+   282→    ],
+   283→    certifications: [
+   284→      { id: uid(), name: "AWS Certified Developer", issuer: "Amazon Web Services", year: "2023" },
+   285→      { id: uid(), name: "Professional Scrum Master I", issuer: "Scrum.org", year: "2022" },
+   286→    ],
+   287→    languages: [
+   288→      { id: uid(), name: "English", level: "Native" },
+   289→      { id: uid(), name: "Mandarin", level: "Fluent" },
+   290→    ],
+   291→  };
+   292→}
+   293→
+   294→function seedResume2(): ResumeData {
+   295→  return {
+   296→    id: "seed-maya",
+   297→    title: "Product Manager — Stripe",
+   298→    template: "executive",
+   299→    accent: "#f59e0b",
+   300→    updatedAt: Date.now() - 1000 * 60 * 60 * 26,
+   301→    personal: {
+   302→      fullName: "Maya Rodriguez",
+   303→      jobTitle: "Senior Product Manager",
+   304→      email: "maya.rodriguez@email.com",
+   305→      phone: "+1 (212) 555-0184",
+   306→      location: "New York, NY",
+   307→      website: "mayarodriguez.co",
+   308→      linkedin: "linkedin.com/in/mayarodriguez",
+   309→      github: "",
+   310→    },
+   311→    summary:
+   312→      "Results-driven Product Manager with 8 years of experience scaling fintech products from zero to $40M ARR. Expert in data-led discovery, experimentation, and cross-functional leadership across teams of 25+.",
+   313→    experience: [
+   314→      {
+   315→        id: uid(),
+   316→        company: "PayFlow",
+   317→        role: "Senior Product Manager",
+   318→        location: "New York, NY",
+   319→        startDate: "2020-01",
+   320→        endDate: "",
+   321→        current: true,
+   322→        bullets: [
+   323→          "Owned payments checkout product generating $40M ARR; grew conversion 22% through 60+ A/B tests",
+   324→          "Launched instant payouts feature in 3 months, capturing 15% market share in first year",
+   325→          "Managed roadmap across 4 squads (25 engineers/designers) using OKR framework",
+   326→        ],
+   327→      },
+   328→      {
+   329→        id: uid(),
+   330→        company: "CommerceOS",
+   331→        role: "Product Manager",
+   332→        location: "Boston, MA",
+   333→        startDate: "2016-09",
+   334→        endDate: "2019-12",
+   335→        current: false,
+   336→        bullets: [
+   337→          "Scaled merchant analytics platform from 5K to 80K active merchants",
+   338→          "Defined north-star metrics adopted company-wide, aligning 3 business units",
+   339→        ],
+   340→      },
+   341→    ],
+   342→    education: [
+   343→      {
+   344→        id: uid(),
+   345→        school: "Columbia University",
+   346→        degree: "MBA",
+   347→        field: "Business Administration",
+   348→        startDate: "2014-08",
+   349→        endDate: "2016-05",
+   350→        gpa: "",
+   351→      },
+   352→      {
+   353→        id: uid(),
+   354→        school: "Boston University",
+   355→        degree: "B.A.",
+   356→        field: "Economics",
+   357→        startDate: "2010-08",
+   358→        endDate: "2014-05",
+   359→        gpa: "3.7",
+   360→      },
+   361→    ],
+   362→    skills: [
+   363→      { id: uid(), name: "Product Strategy", level: 5 },
+   364→      { id: uid(), name: "A/B Testing", level: 5 },
+   365→      { id: uid(), name: "SQL", level: 4 },
+   366→      { id: uid(), name: "Roadmapping", level: 5 },
+   367→      { id: uid(), name: "Figma", level: 4 },
+   368→      { id: uid(), name: "Stakeholder Mgmt", level: 5 },
+   369→    ],
+   370→    projects: [],
+   371→    certifications: [{ id: uid(), name: "Certified Scrum Product Owner", issuer: "Scrum Alliance", year: "2021" }],
+   372→    languages: [
+   373→      { id: uid(), name: "English", level: "Native" },
+   374→      { id: uid(), name: "Spanish", level: "Native" },
+   375→    ],
+   376→  };
+   377→}
+   378→
+   379→function seedResume3(): ResumeData {
+   380→  return {
+   381→    id: "seed-david",
+   382→    title: "Data Scientist — OpenAI",
+   383→    template: "technical",
+   384→    accent: "#8b5cf6",
+   385→    updatedAt: Date.now() - 1000 * 60 * 60 * 50,
+   386→    personal: {
+   387→      fullName: "David Kim",
+   388→      jobTitle: "Data Scientist",
+   389→      email: "david.kim@email.com",
+   390→      phone: "+1 (206) 555-0177",
+   391→      location: "Seattle, WA",
+   392→      website: "davidkim.ai",
+   393→      linkedin: "linkedin.com/in/davidkim",
+   394→      github: "github.com/davidkim",
+   395→    },
+   396→    summary:
+   397→      "Data Scientist with 5 years of experience in machine learning and large-scale data pipelines. Deployed models serving 10M+ daily predictions and reduced inference costs by 35%.",
+   398→    experience: [
+   399→      {
+   400→        id: uid(),
+   401→        company: "CloudMetrics",
+   402→        role: "Data Scientist",
+   403→        location: "Seattle, WA",
+   404→        startDate: "2021-02",
+   405→        endDate: "",
+   406→        current: true,
+   407→        bullets: [
+   408→          "Built churn-prediction ensemble (XGBoost + neural nets) saving $2.3M annually in retained revenue",
+   409→          "Designed feature store on Spark processing 4TB daily with sub-hour freshness",
+   410→          "Reduced model inference costs 35% via distillation and ONNX runtime optimization",
+   411→        ],
+   412→      },
+   413→      {
+   414→        id: uid(),
+   415→        company: "InsightEngine",
+   416→        role: "ML Engineer",
+   417→        location: "Remote",
+   418→        startDate: "2019-06",
+   419→        endDate: "2021-01",
+   420→        current: false,
+   421→        bullets: [
+   422→          "Deployed NLP classification pipeline (BERT fine-tuning) reaching 94% F1 across 12 languages",
+   423→          "Automated retraining workflows cutting model refresh cycle from 2 weeks to 2 days",
+   424→        ],
+   425→      },
+   426→    ],
+   427→    education: [
+   428→      {
+   429→        id: uid(),
+   430→        school: "University of Washington",
+   431→        degree: "M.S.",
+   432→        field: "Statistics",
+   433→        startDate: "2017-08",
+   434→        endDate: "2019-05",
+   435→        gpa: "3.9",
+   436→      },
+   437→    ],
+   438→    skills: [
+   439→      { id: uid(), name: "Python", level: 5 },
+   440→      { id: uid(), name: "PyTorch", level: 5 },
+   441→      { id: uid(), name: "SQL", level: 5 },
+   442→      { id: uid(), name: "Spark", level: 4 },
+   443→      { id: uid(), name: "XGBoost", level: 4 },
+   444→      { id: uid(), name: "Docker/K8s", level: 4 },
+   445→      { id: uid(), name: "AWS", level: 4 },
+   446→      { id: uid(), name: "Airflow", level: 3 },
+   447→    ],
+   448→    projects: [
+   449→      {
+   450→        id: uid(),
+   451→        name: "ForecastBench",
+   452→        url: "github.com/davidkim/forecastbench",
+   453→        description: "Time-series benchmarking toolkit with 1.1K GitHub stars and 40+ model implementations.",
+   454→        tech: ["Python", "Prophet", "MLflow"],
+   455→      },
+   456→    ],
+   457→    certifications: [{ id: uid(), name: "Google Cloud Professional ML Engineer", issuer: "Google Cloud", year: "2023" }],
+   458→    languages: [
+   459→      { id: uid(), name: "English", level: "Fluent" },
+   460→      { id: uid(), name: "Korean", level: "Native" },
+   461→    ],
+   462→  };
+   463→}
+   464→
+   465→/* ============================== Job Applications ============================== */
+   466→
+   467→export type ApplicationStage = "saved" | "applied" | "interview" | "offer" | "rejected";
+   468→
+   469→export const STAGE_META: Record<
+   470→  ApplicationStage,
+   471→  { label: string; color: string; tint: string; icon: string }
+   472→> = {
+   473→  saved: { label: "Saved", color: "#78716c", tint: "#78716c14", icon: "Bookmark" },
+   474→  applied: { label: "Applied", color: "#8b5cf6", tint: "#8b5cf614", icon: "Send" },
+   475→  interview: { label: "Interview", color: "#f59e0b", tint: "#f59e0b14", icon: "Users" },
+   476→  offer: { label: "Offer", color: "#10b981", tint: "#10b98114", icon: "Trophy" },
+   477→  rejected: { label: "Rejected", color: "#f43f5e", tint: "#f43f5e14", icon: "XCircle" },
+   478→};
+   479→
+   480→export interface JobApplication {
+   481→  id: string;
+   482→  company: string;
+   483→  role: string;
+   484→  location: string;
+   485→  salary: string;
+   486→  url: string;
+   487→  stage: ApplicationStage;
+   488→  resumeId: string; // resume used to apply ("" = none)
+   489→  notes: string;
+   490→  appliedAt: number; // epoch ms when added
+   491→  updatedAt: number;
+   492→}
+   493→
+   494→export interface ScoreEntry {
+   495→  id: string;
+   496→  resumeId: string;
+   497→  resumeTitle: string;
+   498→  score: number;
+   499→  at: number; // epoch ms
+   500→}
+   501→
+   502→function seedApplications(): JobApplication[] {
+   503→  const now = Date.now();
+   504→  const day = 1000 * 60 * 60 * 24;
+   505→  return [
+   506→    {
+   507→      id: uid(),
+   508→      company: "Vercel",
+   509→      role: "Senior Frontend Engineer",
+   510→      location: "Remote",
+   511→      salary: "$180K – $220K",
+   512→      url: "vercel.com/careers",
+   513→      stage: "interview",
+   514→      resumeId: "seed-alex",
+   515→      notes: "Technical interview scheduled — review React Server Components & rendering patterns.",
+   516→      appliedAt: now - day * 9,
+   517→      updatedAt: now - day * 1,
+   518→    },
+   519→    {
+   520→      id: uid(),
+   521→      company: "Linear",
+   522→      role: "Product Engineer",
+   523→      location: "Remote",
+   524→      salary: "$160K – $200K",
+   525→      url: "linear.app/careers",
+   526→      stage: "applied",
+   527→      resumeId: "seed-alex",
+   528→      notes: "Referred by a friend on the design team.",
+   529→      appliedAt: now - day * 4,
+   530→      updatedAt: now - day * 4,
+   531→    },
+   532→    {
+   533→      id: uid(),
+   534→      company: "Stripe",
+   535→      role: "Senior Product Manager",
+   536→      location: "New York, NY",
+   537→      salary: "$190K – $240K",
+   538→      url: "stripe.com/jobs",
+   539→      stage: "offer",
+   540→      resumeId: "seed-maya",
+   541→      notes: "Verbal offer received — negotiating equity. Deadline Friday.",
+   542→      appliedAt: now - day * 21,
+   543→      updatedAt: now - day * 2,
+   544→    },
+   545→    {
+   546→      id: uid(),
+   547→      company: "Notion",
+   548→      role: "Senior Frontend Engineer",
+   549→      location: "San Francisco, CA (Hybrid)",
+   550→      salary: "$170K – $210K",
+   551→      url: "notion.so/careers",
+   552→      stage: "saved",
+   553→      resumeId: "seed-alex",
+   554→      notes: "Tailor resume bullets toward collaborative editing / realtime sync.",
+   555→      appliedAt: now - day * 2,
+   556→      updatedAt: now - day * 2,
+   557→    },
+   558→    {
+   559→      id: uid(),
+   560→      company: "Anthropic",
+   561→      role: "Data Scientist, Applied",
+   562→      location: "Remote",
+   563→      salary: "$200K – $275K",
+   564→      url: "anthropic.com/careers",
+   565→      stage: "applied",
+   566→      resumeId: "seed-david",
+   567→      notes: "Emphasize eval methodology + LLM fine-tuning experience.",
+   568→      appliedAt: now - day * 6,
+   569→      updatedAt: now - day * 3,
+   570→    },
+   571→    {
+   572→      id: uid(),
+   573→      company: "Figma",
+   574→      role: "Senior Frontend Engineer",
+   575→      location: "Remote",
+   576→      salary: "$185K – $230K",
+   577→      url: "figma.com/careers",
+   578→      stage: "rejected",
+   579→      resumeId: "seed-alex",
+   580→      notes: "Passed on role — keep in touch with recruiter for Q3 openings.",
+   581→      appliedAt: now - day * 30,
+   582→      updatedAt: now - day * 12,
+   583→    },
+   584→  ];
+   585→}
+   586→
+   587→function seedScoreHistory(): ScoreEntry[] {
+   588→  const now = Date.now();
+   589→  const day = 1000 * 60 * 60 * 24;
+   590→  const mk = (resumeId: string, resumeTitle: string, score: number, daysAgo: number): ScoreEntry => ({
+   591→    id: uid(),
+   592→    resumeId,
+   593→    resumeTitle,
+   594→    score,
+   595→    at: now - day * daysAgo,
+   596→  });
+   597→  return [
+   598→    mk("seed-alex", "Senior Frontend Engineer — Google", 71, 20),
+   599→    mk("seed-alex", "Senior Frontend Engineer — Google", 78, 14),
+   600→    mk("seed-maya", "Product Manager — Stripe", 74, 11),
+   601→    mk("seed-alex", "Senior Frontend Engineer — Google", 82, 9),
+   602→    mk("seed-david", "Data Scientist — OpenAI", 80, 7),
+   603→    mk("seed-maya", "Product Manager — Stripe", 80, 5),
+   604→    mk("seed-david", "Data Scientist — OpenAI", 86, 3),
+   605→    mk("seed-alex", "Senior Frontend Engineer — Google", 87, 1),
+   606→  ];
+   607→}
+   608→
+   609→/* ============================== Store ============================== */
+   610→
+   611→interface ResumeState {
+   612→  resumes: ResumeData[];
+   613→  activeResumeId: string;
+   614→  coverLetterCount: number;
+   615→  applications: JobApplication[];
+   616→  scoreHistory: ScoreEntry[];
+   617→  createResume: (title?: string, template?: TemplateId, accent?: string) => string;
+   618→  duplicateResume: (id: string) => string | undefined;
+   619→  deleteResume: (id: string) => void;
+   620→  setActive: (id: string) => void;
+   621→  updateResume: (id: string, patch: Partial<ResumeData>) => void;
+   622→  resetAll: () => void;
+   623→  /** Validates a parsed backup payload and replaces the workspace with it. Returns the number of resumes imported, or -1 if the payload is invalid. */
+   624→  importData: (payload: unknown) => number;
+   625→  incrementCoverLetters: () => void;
+   626→  addApplication: (app: Omit<JobApplication, "id" | "appliedAt" | "updatedAt">) => string;
+   627→  updateApplication: (id: string, patch: Partial<JobApplication>) => void;
+   628→  moveApplication: (id: string, stage: ApplicationStage) => void;
+   629→  deleteApplication: (id: string) => void;
+   630→  logScore: (resumeId: string, resumeTitle: string, score: number) => void;
+   631→}
+   632→
+   633→export const useResumeStore = create<ResumeState>()(
+   634→  persist(
+   635→    (set, get) => ({
+   636→      resumes: [seedResume1(), seedResume2(), seedResume3()],
+   637→      activeResumeId: "seed-alex",
+   638→      coverLetterCount: 2,
+   639→      applications: seedApplications(),
+   640→      scoreHistory: seedScoreHistory(),
+   641→      createResume: (title, template, accent) => {
+   642→        const id = uid();
+   643→        const base = emptyResume(title ?? "Untitled Resume", template ?? "modern", accent ?? "#10b981");
+   644→        const resume: ResumeData = { ...base, id, updatedAt: Date.now() };
+   645→        set((s) => ({ resumes: [resume, ...s.resumes], activeResumeId: id }));
+   646→        return id;
+   647→      },
+   648→      duplicateResume: (id) => {
+   649→        const src = get().resumes.find((r) => r.id === id);
+   650→        if (!src) return undefined;
+   651→        const newId = uid();
+   652→        const copy: ResumeData = {
+   653→          ...structuredClone(src),
+   654→          id: newId,
+   655→          title: `${src.title} (Copy)`,
+   656→          updatedAt: Date.now(),
+   657→        };
+   658→        set((s) => ({ resumes: [copy, ...s.resumes] }));
+   659→        return newId;
+   660→      },
+   661→      deleteResume: (id) =>
+   662→        set((s) => {
+   663→          const resumes = s.resumes.filter((r) => r.id !== id);
+   664→          const activeResumeId =
+   665→            s.activeResumeId === id ? (resumes[0]?.id ?? "") : s.activeResumeId;
+   666→          return { resumes, activeResumeId };
+   667→        }),
+   668→      setActive: (id) => set({ activeResumeId: id }),
+   669→      updateResume: (id, patch) =>
+   670→        set((s) => ({
+   671→          resumes: s.resumes.map((r) =>
+   672→            r.id === id ? { ...r, ...patch, updatedAt: Date.now() } : r
+   673→          ),
+   674→        })),
+   675→      resetAll: () =>
+   676→        set({
+   677→          resumes: [seedResume1(), seedResume2(), seedResume3()],
+   678→          activeResumeId: "seed-alex",
+   679→          coverLetterCount: 2,
+   680→          applications: seedApplications(),
+   681→          scoreHistory: seedScoreHistory(),
+   682→        }),
+   683→      importData: (payload) => {
+   684→        if (!payload || typeof payload !== "object" || Array.isArray(payload)) return -1;
+   685→        const raw = payload as Record<string, unknown>;
+   686→
+   687→        /* Resumes are required — every entry needs an id, a title and a personal object. */
+   688→        const rawResumes = raw.resumes;
+   689→        if (!Array.isArray(rawResumes) || rawResumes.length === 0) return -1;
+   690→        const blank = emptyResume();
+   691→        const resumes: ResumeData[] = [];
+   692→        for (const entry of rawResumes) {
+   693→          if (!entry || typeof entry !== "object" || Array.isArray(entry)) return -1;
+   694→          const r = entry as Record<string, unknown>;
+   695→          if (typeof r.id !== "string" || r.id.trim() === "") return -1;
+   696→          if (typeof r.title !== "string") return -1;
+   697→          if (!r.personal || typeof r.personal !== "object" || Array.isArray(r.personal)) return -1;
+   698→          const copy = structuredClone(entry) as ResumeData;
+   699→          copy.template = typeof r.template === "string" && r.template in TEMPLATE_META ? (r.template as TemplateId) : blank.template;
+   700→          copy.accent = typeof r.accent === "string" && r.accent.trim() !== "" ? r.accent : blank.accent;
+   701→          copy.summary = typeof r.summary === "string" ? r.summary : blank.summary;
+   702→          copy.personal = { ...blank.personal, ...(r.personal as Partial<PersonalInfo>) };
+   703→          for (const key of ["experience", "education", "skills", "projects", "certifications", "languages"] as const) {
+   704→            if (!Array.isArray(copy[key])) copy[key] = [];
+   705→          }
+   706→          copy.updatedAt = typeof r.updatedAt === "number" && Number.isFinite(r.updatedAt) ? r.updatedAt : Date.now();
+   707→          resumes.push(copy);
+   708→        }
+   709→
+   710→        /* Active resume falls back to the first import if the id is missing or unknown. */
+   711→        const wantedActive = typeof raw.activeResumeId === "string" ? raw.activeResumeId : "";
+   712→        const firstId = resumes[0]!.id;
+   713→        const activeResumeId = resumes.some((r) => r.id === wantedActive) ? wantedActive : firstId;
+   714→
+   715→        const coverLetterCount =
+   716→          typeof raw.coverLetterCount === "number" && Number.isFinite(raw.coverLetterCount)
+   717→            ? Math.max(0, Math.round(raw.coverLetterCount))
+   718→            : 0;
+   719→
+   720→        /* Applications and score history fall back to seeds when absent (mirrors resetAll). */
+   721→        let applications = seedApplications();
+   722→        if (Array.isArray(raw.applications)) {
+   723→          const clean: JobApplication[] = [];
+   724→          for (const entry of raw.applications) {
+   725→            if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+   726→            const a = entry as Record<string, unknown>;
+   727→            clean.push({
+   728→              id: typeof a.id === "string" && a.id !== "" ? a.id : uid(),
+   729→              company: typeof a.company === "string" ? a.company : "",
+   730→              role: typeof a.role === "string" ? a.role : "",
+   731→              location: typeof a.location === "string" ? a.location : "",
+   732→              salary: typeof a.salary === "string" ? a.salary : "",
+   733→              url: typeof a.url === "string" ? a.url : "",
+   734→              stage: typeof a.stage === "string" && a.stage in STAGE_META ? (a.stage as ApplicationStage) : "applied",
+   735→              resumeId: typeof a.resumeId === "string" ? a.resumeId : "",
+   736→              notes: typeof a.notes === "string" ? a.notes : "",
+   737→              appliedAt: typeof a.appliedAt === "number" && Number.isFinite(a.appliedAt) ? a.appliedAt : Date.now(),
+   738→              updatedAt: typeof a.updatedAt === "number" && Number.isFinite(a.updatedAt) ? a.updatedAt : Date.now(),
+   739→            });
+   740→          }
+   741→          if (clean.length > 0) applications = clean;
+   742→        }
+   743→
+   744→        let scoreHistory = seedScoreHistory();
+   745→        if (Array.isArray(raw.scoreHistory)) {
+   746→          const clean: ScoreEntry[] = [];
+   747→          for (const entry of raw.scoreHistory) {
+   748→            if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+   749→            const e = entry as Record<string, unknown>;
+   750→            if (typeof e.score !== "number" || !Number.isFinite(e.score)) continue;
+   751→            clean.push({
+   752→              id: typeof e.id === "string" && e.id !== "" ? e.id : uid(),
+   753→              resumeId: typeof e.resumeId === "string" ? e.resumeId : "",
+   754→              resumeTitle: typeof e.resumeTitle === "string" ? e.resumeTitle : "Untitled",
+   755→              score: e.score,
+   756→              at: typeof e.at === "number" && Number.isFinite(e.at) ? e.at : Date.now(),
+   757→            });
+   758→          }
+   759→          if (clean.length > 0) scoreHistory = clean.slice(-60);
+   760→        }
+   761→
+   762→        set({ resumes, activeResumeId, coverLetterCount, applications, scoreHistory });
+   763→        return resumes.length;
+   764→      },
+   765→      incrementCoverLetters: () => set((s) => ({ coverLetterCount: s.coverLetterCount + 1 })),
+   766→      addApplication: (app) => {
+   767→        const id = uid();
+   768→        const full: JobApplication = {
+   769→          ...app,
+   770→          id,
+   771→          appliedAt: Date.now(),
+   772→          updatedAt: Date.now(),
+   773→        };
+   774→        set((s) => ({ applications: [full, ...s.applications] }));
+   775→        return id;
+   776→      },
+   777→      updateApplication: (id, patch) =>
+   778→        set((s) => ({
+   779→          applications: s.applications.map((a) =>
+   780→            a.id === id ? { ...a, ...patch, updatedAt: Date.now() } : a
+   781→          ),
+   782→        })),
+   783→      moveApplication: (id, stage) =>
+   784→        set((s) => ({
+   785→          applications: s.applications.map((a) =>
+   786→            a.id === id ? { ...a, stage, updatedAt: Date.now() } : a
+   787→          ),
+   788→        })),
+   789→      deleteApplication: (id) =>
+   790→        set((s) => ({ applications: s.applications.filter((a) => a.id !== id) })),
+   791→      logScore: (resumeId, resumeTitle, score) =>
+   792→        set((s) => ({
+   793→          scoreHistory: [
+   794→            ...s.scoreHistory,
+   795→            { id: uid(), resumeId, resumeTitle, score, at: Date.now() },
+   796→          ].slice(-60),
+   797→        })),
+   798→    }),
+   799→    {
+   800→      name: "resumeforge-store",
+   801→      storage: createJSONStorage(() => localStorage),
+   802→    }
+   803→  )
+   804→);
+   805→
+   806→/* Convenience selectors */
+   807→export function useActiveResume(): ResumeData | undefined {
+   808→  return useResumeStore((s) => s.resumes.find((r) => r.id === s.activeResumeId));
+   809→}
+   810→
+   811→export function useGetResume() {
+   812→  return (id: string) => useResumeStore.getState().resumes.find((r) => r.id === id);
+   813→}
+   814→
