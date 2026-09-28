@@ -1,4 +1,4 @@
-.PHONY: default dev dev-fe dev-be install build clean stop help
+.PHONY: default dev dev-fe dev-be install build clean stop prisma-generate prisma-push prisma-migrate help
 
 # Default target when simply typing `make`
 default: dev
@@ -21,6 +21,23 @@ install:
 	@cd backend-go && go mod download
 	@echo "📦 Installing Next.js frontend dependencies..."
 	@cd frontend && npm install
+	@echo "⚡ Generating Prisma Go Client..."
+	@$(MAKE) prisma-generate
+
+## prisma-generate: Generate Prisma Client Go types and engine
+prisma-generate:
+	@echo "⚡ Generating Prisma Client Go from backend-go/prisma/schema.prisma..."
+	@cd backend-go && go run github.com/steebchen/prisma-client-go generate
+
+## prisma-push: Push Prisma schema directly to PostgreSQL database
+prisma-push:
+	@echo "🚀 Pushing Prisma schema to database..."
+	@cd backend-go && go run github.com/steebchen/prisma-client-go db push
+
+## prisma-migrate: Create and apply Prisma database migrations
+prisma-migrate:
+	@echo "📦 Running Prisma database migrations..."
+	@cd backend-go && go run github.com/steebchen/prisma-client-go migrate dev
 
 ## build: Build production artifacts for both projects
 build:
@@ -44,10 +61,13 @@ clean:
 ## help: Display available make targets
 help:
 	@echo "Available commands in Resumind:"
-	@echo "  make dev      - Start both Frontend & Backend (graceful Ctrl+C shutdown)"
-	@echo "  make dev-fe   - Start Frontend only"
-	@echo "  make dev-be   - Start Backend only"
-	@echo "  make install  - Install dependencies for both projects"
-	@echo "  make build    - Build production packages for both"
-	@echo "  make stop     - Force-free ports 3000 & 8080 if stuck"
-	@echo "  make clean    - Remove build artifacts"
+	@echo "  make dev             - Start both Frontend & Backend (graceful Ctrl+C shutdown)"
+	@echo "  make dev-fe          - Start Frontend only"
+	@echo "  make dev-be          - Start Backend only"
+	@echo "  make install         - Install dependencies and generate Prisma client"
+	@echo "  make prisma-generate - Generate Prisma Client Go models and queries"
+	@echo "  make prisma-push     - Sync schema changes directly to PostgreSQL"
+	@echo "  make prisma-migrate  - Create and run migration files"
+	@echo "  make build           - Build production packages for both"
+	@echo "  make stop            - Force-free ports 3000 & 8080 if stuck"
+	@echo "  make clean           - Remove build artifacts"

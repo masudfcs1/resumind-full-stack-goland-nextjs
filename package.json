@@ -7,6 +7,9 @@
     "dev": "./scripts/dev.sh",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend-go && go run ./cmd/server",
+    "prisma:generate": "make prisma-generate",
+    "prisma:push": "make prisma-push",
+    "prisma:migrate": "make prisma-migrate",
     "build": "make build",
     "clean": "make clean",
     "stop": "make stop"
