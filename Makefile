@@ -13,12 +13,12 @@ dev-fe:
 
 ## dev-be: Run Go backend only (port 8080)
 dev-be:
-	@cd backend-go && go run ./cmd/server
+	@cd backend && go run ./cmd/server
 
 ## install: Install all dependencies for both frontend and backend
 install:
 	@echo "📦 Installing Go backend dependencies..."
-	@cd backend-go && go mod download
+	@cd backend && go mod download
 	@echo "📦 Installing Next.js frontend dependencies..."
 	@cd frontend && npm install
 	@echo "⚡ Generating Prisma Go Client..."
@@ -26,23 +26,23 @@ install:
 
 ## prisma-generate: Generate Prisma Client Go types and engine
 prisma-generate:
-	@echo "⚡ Generating Prisma Client Go from backend-go/prisma/schema.prisma..."
-	@cd backend-go && go run github.com/steebchen/prisma-client-go generate
+	@echo "⚡ Generating Prisma Client Go from backend/prisma/schema.prisma..."
+	@cd backend && go run github.com/steebchen/prisma-client-go generate
 
 ## prisma-push: Push Prisma schema directly to PostgreSQL database
 prisma-push:
 	@echo "🚀 Pushing Prisma schema to database..."
-	@cd backend-go && go run github.com/steebchen/prisma-client-go db push
+	@cd backend && go run github.com/steebchen/prisma-client-go db push
 
 ## prisma-migrate: Create and apply Prisma database migrations
 prisma-migrate:
 	@echo "📦 Running Prisma database migrations..."
-	@cd backend-go && go run github.com/steebchen/prisma-client-go migrate dev
+	@cd backend && go run github.com/steebchen/prisma-client-go migrate dev
 
 ## build: Build production artifacts for both projects
 build:
 	@echo "🔨 Building Go backend..."
-	@cd backend-go && go build -o bin/server ./cmd/server
+	@cd backend && go build -o bin/server ./cmd/server
 	@echo "🔨 Building Next.js frontend..."
 	@cd frontend && npm run build
 
@@ -55,7 +55,7 @@ stop:
 
 ## clean: Remove build artifacts and temporary files
 clean:
-	@rm -rf backend-go/bin frontend/.next frontend/dev.log
+	@rm -rf backend/bin frontend/.next frontend/dev.log
 	@echo "✔ Clean complete."
 
 ## help: Display available make targets

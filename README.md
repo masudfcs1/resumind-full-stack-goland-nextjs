@@ -28,7 +28,7 @@ For detailed documentation, refer to **[PRISMA_SETUP.md](PRISMA_SETUP.md)**.
 
 | Command | Description |
 | :--- | :--- |
-| `make prisma-generate` | Generate type-safe Go structs and Prisma client in `backend-go/internal/database/db/` |
+| `make prisma-generate` | Generate type-safe Go structs and Prisma client in `backend/internal/database/db/` |
 | `make prisma-push` | Sync schema directly with your PostgreSQL database without migration files |
 | `make prisma-migrate` | Create and apply versioned database migrations |
 
@@ -44,7 +44,7 @@ resumind/
 ├── scripts/
 │   └── dev.sh                   # Concurrent dev server runner with Ctrl+C trap
 ├── frontend/                    # Next.js 16 app (port 3000)
-└── backend-go/                  # Go / Chi API server (port 8080)
+└── backend/                     # Go / Chi API server (port 8080)
     ├── prisma/
     │   └── schema.prisma        # PostgreSQL models & generator configuration
     ├── internal/

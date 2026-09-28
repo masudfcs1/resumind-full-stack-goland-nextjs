@@ -12,7 +12,7 @@ Resumind uses **[Prisma Client Go](https://github.com/steebchen/prisma-client-go
 resumind/
 ├── Makefile                     # Root commands: make prisma-generate, make dev, etc.
 ├── package.json                 # npm run prisma:generate
-└── backend-go/
+└── backend/
     ├── .env                     # Contains DATABASE_URL (PostgreSQL)
     ├── prisma/
     │   └── schema.prisma        # Database models & Prisma generator config
@@ -28,7 +28,7 @@ resumind/
 
 ## ⚙️ Configuration
 
-In [`backend-go/prisma/schema.prisma`](backend-go/prisma/schema.prisma):
+In [`backend/prisma/schema.prisma`](backend/prisma/schema.prisma):
 
 ```prisma
 datasource db {
@@ -66,9 +66,9 @@ npm run prisma:generate
 ```
 
 ### Option 3: Direct Go CLI
-Inside the `backend-go` directory:
+Inside the `backend` directory:
 ```bash
-cd backend-go
+cd backend
 go run github.com/steebchen/prisma-client-go generate
 ```
 
@@ -76,12 +76,12 @@ go run github.com/steebchen/prisma-client-go generate
 
 ## 🗄️ Database Workflow Commands
 
-| Action | Root Command | Direct Command (in `backend-go/`) |
+| Action | Root Command | Direct Command (in `backend/`) |
 | :--- | :--- | :--- |
 | **Generate Go Client** | `make prisma-generate` | `go run github.com/steebchen/prisma-client-go generate` |
 | **Push Schema to DB (Dev Sync)** | `make prisma-push` | `go run github.com/steebchen/prisma-client-go db push` |
 | **Create/Run Migrations** | `make prisma-migrate` | `go run github.com/steebchen/prisma-client-go migrate dev` |
-| **Install & Auto-Generate** | `make install` | `cd backend-go && go mod download && make generate` |
+| **Install & Auto-Generate** | `make install` | `cd backend && go mod download && make generate` |
 
 ---
 
@@ -90,7 +90,7 @@ go run github.com/steebchen/prisma-client-go generate
 Whenever you add or change database models:
 
 ### 1. Edit the Schema
-Open [`backend-go/prisma/schema.prisma`](backend-go/prisma/schema.prisma) and define your model:
+Open [`backend/prisma/schema.prisma`](backend/prisma/schema.prisma) and define your model:
 
 ```prisma
 model Resume {
@@ -121,7 +121,7 @@ make prisma-generate
 ## 💻 Using the Generated Client in Go Code
 
 ### Initializing the Client
-In [`backend-go/internal/database/prisma.go`](backend-go/internal/database/prisma.go):
+In [`backend/internal/database/prisma.go`](backend/internal/database/prisma.go):
 ```go
 package database
 
@@ -163,7 +163,7 @@ newUser, err := client.User.CreateOne(
 ## 🔒 Git & CI/CD Best Practices
 
 1. **`*_gen.go` Files Are Ignored by Default**:
-   The generated Go files are automatically ignored in [`backend-go/internal/database/db/.gitignore`](backend-go/internal/database/db/.gitignore) to keep repository size lean and prevent merge conflicts.
+   The generated Go files are automatically ignored in [`backend/internal/database/db/.gitignore`](backend/internal/database/db/.gitignore) to keep repository size lean and prevent merge conflicts.
 2. **Automated Generation**:
    When cloning or setting up on a new machine:
    ```bash
@@ -178,5 +178,5 @@ newUser, err := client.User.CreateOne(
 | Issue | Cause | Fix |
 | :--- | :--- | :--- |
 | `undefined: db.PrismaClient` | Client hasn't been generated yet | Run `make prisma-generate` |
-| `failed to connect to database via Prisma` | Invalid or unreachable `DATABASE_URL` | Check `backend-go/.env` connection string |
+| `failed to connect to database via Prisma` | Invalid or unreachable `DATABASE_URL` | Check `backend/.env` connection string |
 | `bind: address already in use` | Old dev server still running | Run `make stop` to free ports 3000 and 8080 |

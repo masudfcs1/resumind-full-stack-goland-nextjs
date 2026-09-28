@@ -12,7 +12,7 @@ set -u
 # ── Paths & Config ───────────────────────────────────────────────────────────
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 FRONTEND_DIR="$ROOT_DIR/frontend"
-BACKEND_DIR="$ROOT_DIR/backend-go"
+BACKEND_DIR="$ROOT_DIR/backend"
 
 FRONTEND_PORT=3000
 BACKEND_PORT=8080
