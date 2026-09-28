@@ -1,0 +1,9 @@
+{
+  "git.repositoryScanMaxDepth": 1,
+  "git.autoRepositoryDetection": "subFolders",
+  "git.ignoredRepositories": [
+    "backend-go",
+    "frontend"
+  ],
+  "git.openRepositoryInParentFolders": "never"
+}

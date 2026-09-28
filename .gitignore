@@ -13,3 +13,10 @@ bin/
 .env
 .env*.local
 .env.local
+
+# IDE Configs
+.idea/**
+!.idea/vcs.xml
+.vscode/**
+!.vscode/settings.json
+
