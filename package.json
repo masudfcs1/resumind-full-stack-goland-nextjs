@@ -1,0 +1,14 @@
+{
+  "name": "resumind-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Resumind monorepo root runner",
+  "scripts": {
+    "dev": "./scripts/dev.sh",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend-go && go run ./cmd/server",
+    "build": "make build",
+    "clean": "make clean",
+    "stop": "make stop"
+  }
+}
