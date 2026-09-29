@@ -4,7 +4,7 @@ An enterprise-ready full-stack application combining a **Next.js** frontend with
 
 ---
 
-## 🚀 Quickstart
+##  Quickstart
 
 Run both frontend and backend concurrently with a single command:
 
