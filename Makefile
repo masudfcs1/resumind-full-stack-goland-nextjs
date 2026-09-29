@@ -5,7 +5,7 @@ default: dev
 
 ## dev: Run both frontend and backend concurrently with single Ctrl+C shutdown
 dev:
-	@./scripts/dev.sh
+	@node scripts/dev.mjs
 
 ## dev-fe: Run Next.js frontend only (port 3000)
 dev-fe:
@@ -61,7 +61,7 @@ clean:
 ## help: Display available make targets
 help:
 	@echo "Available commands in Resumind:"
-	@echo "  make dev             - Start both Frontend & Backend (graceful Ctrl+C shutdown)"
+	@echo "  make dev             - Start both Frontend & Backend (Ctrl+C shutdown)"
 	@echo "  make dev-fe          - Start Frontend only"
 	@echo "  make dev-be          - Start Backend only"
 	@echo "  make install         - Install dependencies and generate Prisma client"

@@ -6,6 +6,9 @@ An enterprise-ready full-stack application combining a **Next.js** frontend with
 
 ##  Quickstart
 
+Create `backend/.env` from [`backend/.env.example`](backend/.env.example) and set
+`DATABASE_URL` to your PostgreSQL connection string before starting the backend.
+
 Run both frontend and backend concurrently with a single command:
 
 ```bash
@@ -18,7 +21,12 @@ make dev
 npm run dev
 ```
 
-> **Clean Shutdown**: Press `Ctrl + C` anytime in your terminal to cleanly terminate both services and liberate ports.
+On Windows, run these commands in PowerShell or Command Prompt with Node.js/npm,
+Go, and GNU Make on `PATH`. The dev launcher runs natively; Git Bash and WSL are
+not required. If Make is not installed, use `npm run dev` after installing the
+frontend and backend dependencies and generating the Prisma client.
+
+> **Shutdown**: Press `Ctrl + C` anytime in your terminal to stop both services and release their ports. On Windows, the launcher terminates both process trees.
 
 ---
 
@@ -42,7 +50,8 @@ resumind/
 ├── package.json                 # Monorepo scripts (npm run dev, npm run prisma:generate)
 ├── PRISMA_SETUP.md              # Complete Prisma Client Go setup & reference guide
 ├── scripts/
-│   └── dev.sh                   # Concurrent dev server runner with Ctrl+C trap
+│   ├── dev.mjs                  # Platform-aware dev launcher (native Windows support)
+│   └── dev.sh                   # macOS/Linux dev runner with Ctrl+C trap
 ├── frontend/                    # Next.js 16 app (port 3000)
 └── backend/                     # Go / Chi API server (port 8080)
     ├── prisma/

@@ -4,7 +4,7 @@
   "private": true,
   "description": "Resumind monorepo root runner",
   "scripts": {
-    "dev": "./scripts/dev.sh",
+    "dev": "node scripts/dev.mjs",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && go run ./cmd/server",
     "prisma:generate": "make prisma-generate",
